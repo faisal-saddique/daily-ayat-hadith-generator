@@ -1,0 +1,67 @@
+{
+  "hijri_offset_days": -1,
+  "translations": {
+    "urdu": "Maududi",
+    "english": "MaududiEn",
+    "available_urdu": [
+      "Maududi",
+      "Jalandhary",
+      "Junagarhi",
+      "Taqi",
+      "AhmadRaza",
+      "TahirulQadri",
+      "AbdusSalam",
+      "Kilani",
+      "Islahi",
+      "Majid",
+      "Israr",
+      "Riffat"
+    ],
+    "available_english": [
+      "MaududiEn",
+      "Mubarakpuri",
+      "Pickthall",
+      "SaheehInternational",
+      "Sarwar",
+      "Shakir",
+      "YousufAli",
+      "TaqiEnglish"
+    ]
+  },
+  "fonts": {
+    "arabic": "pdms",
+    "urdu": "jameelnoorinastaleeq",
+    "available_arabic_fonts": {
+      "indopak": "fonts/indopak.ttf",
+      "muhammadi": "fonts/muhammadi.ttf",
+      "pdms": "fonts/pdms.ttf",
+      "qalam": "fonts/qalam.ttf"
+    },
+    "available_urdu_fonts": {
+      "jameelnoorinastaleeq": "fonts/jameelnoorinastaleeq.ttf",
+      "noto": "fonts/NotoNastaliqUrdu-Regular.ttf"
+    }
+  },
+  "hadith_source": {
+    "mode": "online",
+    "online": {
+      "enabled": true,
+      "collection": "mishkat",
+      "timeout": 10,
+      "fallback_to_local": true
+    },
+    "local": {
+      "database_path": "content.sqlite3",
+      "table": "mishkaat"
+    },
+    "ai_translation": {
+      "enabled": true,
+      "model": "gemini-2.5-flash"
+    }
+  },
+  "output": {
+    "directory": "output",
+    "image_format": "png",
+    "image_quality": 95
+  }
+}
