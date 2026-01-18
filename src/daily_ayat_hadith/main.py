@@ -97,8 +97,8 @@ def main():
     print(f"Urdu: {ayah.urdu_translation[:50]}...")
     print(f"English: {ayah.english_translation[:50]}...")
 
-    # Generate ayah image
-    ayah_img = image_gen.generate_ayat_image(
+    # Generate ayah image(s) - returns a list (single-page or multi-page)
+    ayah_images = image_gen.generate_ayat_image(
         surah_number=ayah.surah_number,
         ayah_number=ayah.ayah_number,
         arabic_text=ayah.arabic_text,
@@ -108,12 +108,23 @@ def main():
         date=today
     )
 
-    # Save ayah image
-    ayah_filename = f"ayat_{ayah.surah_name.replace(' ', '_')}_{ayah.ayah_number}.png"
-    ayah_output_path = date_output_dir / ayah_filename
-    ayah_img.save(ayah_output_path, quality=95)
+    # Save ayah image(s)
+    print()
+    for page_num, ayah_img in enumerate(ayah_images, 1):
+        if len(ayah_images) == 1:
+            # Single page ayah
+            ayah_filename = f"ayat_{ayah.surah_name.replace(' ', '_')}_{ayah.ayah_number}.png"
+        else:
+            # Multi-page ayah
+            ayah_filename = f"ayat_{ayah.surah_name.replace(' ', '_')}_{ayah.ayah_number}_page{page_num}.png"
 
-    print(f"\n✓ Ayah image saved: {ayah_output_path}")
+        ayah_output_path = date_output_dir / ayah_filename
+        ayah_img.save(ayah_output_path, quality=95)
+
+        if len(ayah_images) == 1:
+            print(f"✓ Ayah image saved: {ayah_output_path}")
+        else:
+            print(f"✓ Ayah page {page_num} saved: {ayah_output_path}")
 
     # Generate Hadith
     print()

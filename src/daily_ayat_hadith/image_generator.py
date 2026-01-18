@@ -275,20 +275,14 @@ class IslamicImageGenerator:
     def generate_ayat_image(self, surah_number: int, ayah_number: int,
                            arabic_text: str, urdu_translation: str,
                            english_translation: str, surah_name: str,
-                           date: datetime) -> Image.Image:
-        """Generate an Ayat image."""
+                           date: datetime) -> list[Image.Image]:
+        """Generate Ayat image(s). Returns a list of images - single image for short ayat, two images for long ones."""
 
-        # Create image
-        img = Image.new('RGB', (self.width, self.height), self.bg_color)
-        draw = ImageDraw.Draw(img)
-
-        # Define content blocks for adaptive layout calculation
         aoozubillah_bismillah = "أَعُوذُ بِاللَّهِ مِنَ الشَّيْطَانِ الرَّجِيمِ ۞ بِسۡمِ اللّٰهِ الرَّحۡمٰنِ الرَّحِیۡمِ ۞"
         arabic_with_symbol = arabic_text + " ۞"
-
-        # Replace Arabic symbols in English translation for layout calculation
         english_clean = self._replace_arabic_symbols_for_english(english_translation)
 
+        # Check if we need multi-page layout
         content_blocks = [
             {'text': aoozubillah_bismillah, 'font_size': 54, 'font_path': self.arabic_font_path, 'type': 'single', 'spacing_after': 60},
             {'text': self._get_display_text(arabic_with_symbol, use_raqm=True), 'font_size': 75, 'font_path': self.arabic_font_path, 'type': 'multi', 'line_spacing': 20, 'margin': 100, 'spacing_after': 80},
@@ -296,9 +290,35 @@ class IslamicImageGenerator:
             {'text': english_clean, 'font_size': 52, 'font_path': '/System/Library/Fonts/Helvetica.ttc', 'type': 'multi', 'line_spacing': 12, 'margin': 150, 'spacing_after': 60},
         ]
 
-        # Calculate optimal scaling
-        max_content_height = self.height - 160  # Reserve space for reference and date
+        max_content_height = self.height - 160
         scaling = self._calculate_adaptive_layout(content_blocks, max_content_height)
+
+        # If scaling is too small (fonts would be cramped), use multi-page layout
+        if scaling['font_scale'] < 0.75:
+            return self._generate_ayat_multipage(
+                surah_number, ayah_number, arabic_text, urdu_translation,
+                english_translation, surah_name, date
+            )
+
+        # Otherwise use single-page layout
+        return [self._generate_ayat_single_page(
+            surah_number, ayah_number, arabic_text, urdu_translation,
+            english_translation, surah_name, date, scaling
+        )]
+
+    def _generate_ayat_single_page(self, surah_number: int, ayah_number: int,
+                                   arabic_text: str, urdu_translation: str,
+                                   english_translation: str, surah_name: str,
+                                   date: datetime, scaling: dict) -> Image.Image:
+        """Generate a single-page ayat image."""
+
+        # Create image
+        img = Image.new('RGB', (self.width, self.height), self.bg_color)
+        draw = ImageDraw.Draw(img)
+
+        aoozubillah_bismillah = "أَعُوذُ بِاللَّهِ مِنَ الشَّيْطَانِ الرَّجِيمِ ۞ بِسۡمِ اللّٰهِ الرَّحۡمٰنِ الرَّحِیۡمِ ۞"
+        arabic_with_symbol = arabic_text + " ۞"
+        english_clean = self._replace_arabic_symbols_for_english(english_translation)
 
         # Load fonts with calculated scaling
         header_font = ImageFont.truetype(str(self.arabic_font_path), int(54 * scaling['font_scale']), layout_engine=LAYOUT_ENGINE)
@@ -338,6 +358,152 @@ class IslamicImageGenerator:
 
         # Date (Islamic calendar) at fixed bottom position
         # Apply offset for local moon sighting differences
+        adjusted_date = date + timedelta(days=self.hijri_offset_days)
+        hijri_date = Gregorian(adjusted_date.year, adjusted_date.month, adjusted_date.day).to_hijri()
+        hijri_months = ["", "Muharram", "Safar", "Rabi' al-Awwal", "Rabi' al-Thani",
+                       "Jumada al-Awwal", "Jumada al-Thani", "Rajab", "Sha'ban",
+                       "Ramadan", "Shawwal", "Dhul-Qi'dah", "Dhul-Hijjah"]
+        date_str = f"({hijri_date.day}{self._get_ordinal_suffix(hijri_date.day)} {hijri_months[hijri_date.month]}, {hijri_date.year}AH)"
+        self._draw_centered_text(draw, date_str, self.height - 100, date_font, self.text_color)
+
+        return img
+
+    def _generate_ayat_multipage(self, surah_number: int, ayah_number: int,
+                                arabic_text: str, urdu_translation: str,
+                                english_translation: str, surah_name: str,
+                                date: datetime) -> list[Image.Image]:
+        """Generate two-page ayat layout for very long verses.
+
+        Page 1: Arabic + Urdu
+        Page 2: English
+        """
+
+        # PAGE 1: Arabic + Urdu
+        page1 = self._generate_ayat_page1(
+            surah_number, ayah_number, arabic_text, urdu_translation, surah_name
+        )
+
+        # PAGE 2: English
+        page2 = self._generate_ayat_page2(
+            surah_number, ayah_number, english_translation, surah_name, date
+        )
+
+        return [page1, page2]
+
+    def _generate_ayat_page1(self, surah_number: int, ayah_number: int,
+                            arabic_text: str, urdu_translation: str,
+                            surah_name: str) -> Image.Image:
+        """Generate page 1 of multi-page ayat: Arabic + Urdu."""
+
+        aoozubillah_bismillah = "أَعُوذُ بِاللَّهِ مِنَ الشَّيْطَانِ الرَّجِيمِ ۞ بِسۡمِ اللّٰهِ الرَّحۡمٰنِ الرَّحِیۡمِ ۞"
+        arabic_with_symbol = arabic_text + " ۞"
+
+        # Calculate optimal scaling without English
+        content_blocks = [
+            {'text': aoozubillah_bismillah, 'font_size': 54, 'font_path': self.arabic_font_path, 'type': 'single', 'spacing_after': 60},
+            {'text': self._get_display_text(arabic_with_symbol, use_raqm=True), 'font_size': 75, 'font_path': self.arabic_font_path, 'type': 'multi', 'line_spacing': 20, 'margin': 100, 'spacing_after': 80},
+            {'text': self._get_display_text(urdu_translation, use_raqm=True), 'font_size': 60, 'font_path': self.urdu_font_path, 'type': 'multi', 'line_spacing': 15, 'margin': 120, 'spacing_after': 60},
+        ]
+
+        max_content_height = self.height - 500  # Extra space for page indicator, reference, and continuation message
+        scaling = self._calculate_adaptive_layout(content_blocks, max_content_height)
+
+        # Create image
+        img = Image.new('RGB', (self.width, self.height), self.bg_color)
+        draw = ImageDraw.Draw(img)
+
+        # Load fonts
+        header_font = ImageFont.truetype(str(self.arabic_font_path), int(54 * scaling['font_scale']), layout_engine=LAYOUT_ENGINE)
+        arabic_font = ImageFont.truetype(str(self.arabic_font_path), int(75 * scaling['font_scale']), layout_engine=LAYOUT_ENGINE)
+        urdu_font = ImageFont.truetype(str(self.urdu_font_path), int(60 * scaling['font_scale']), layout_engine=LAYOUT_ENGINE)
+        reference_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 40)
+        continuation_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 36)
+        page_indicator_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 32)
+
+        y = 80
+
+        # Page indicator at top
+        page_text = "(Page 1 of 2)"
+        self._draw_centered_text(draw, page_text, y, page_indicator_font, (100, 100, 100))
+        y += 60
+
+        # Bismillah
+        header_display = self._get_display_text(aoozubillah_bismillah, use_raqm=True)
+        y = self._draw_centered_text(draw, header_display, y, header_font, self.text_color)
+        y += int(60 * scaling['spacing_scale'])
+
+        # Arabic text
+        arabic_display = self._get_display_text(arabic_with_symbol, use_raqm=True)
+        arabic_lines = self._wrap_text(arabic_display, arabic_font, self.width - 100)
+        y = self._draw_multiline_centered(draw, arabic_lines, y, arabic_font, self.text_color, int(20 * scaling['spacing_scale']))
+        y += int(80 * scaling['spacing_scale'])
+
+        # Urdu translation
+        urdu_display = self._get_display_text(urdu_translation, use_raqm=True)
+        urdu_lines = self._wrap_text(urdu_display, urdu_font, self.width - 120)
+        y = self._draw_multiline_centered(draw, urdu_lines, y, urdu_font, self.text_color, int(15 * scaling['spacing_scale']))
+        y += int(60 * scaling['spacing_scale'])
+
+        # Reference
+        reference = f"({surah_name} {ayah_number})"
+        y = self._draw_centered_text(draw, reference, y, reference_font, self.text_color)
+
+        # Continuation indicator at bottom
+        continuation_text = "English translation on next page >>"
+        self._draw_centered_text(draw, continuation_text, self.height - 100, continuation_font, (100, 100, 100))
+
+        return img
+
+    def _generate_ayat_page2(self, surah_number: int, ayah_number: int,
+                            english_translation: str, surah_name: str,
+                            date: datetime) -> Image.Image:
+        """Generate page 2 of multi-page ayat: English translation."""
+
+        aoozubillah_bismillah = "أَعُوذُ بِاللَّهِ مِنَ الشَّيْطَانِ الرَّجِيمِ ۞ بِسۡمِ اللّٰهِ الرَّحۡمٰنِ الرَّحِیۡمِ ۞"
+        english_clean = self._replace_arabic_symbols_for_english(english_translation)
+
+        # Calculate optimal scaling for English page
+        content_blocks = [
+            {'text': aoozubillah_bismillah, 'font_size': 54, 'font_path': self.arabic_font_path, 'type': 'single', 'spacing_after': 60},
+            {'text': english_clean, 'font_size': 58, 'font_path': '/System/Library/Fonts/Helvetica.ttc', 'type': 'multi', 'line_spacing': 12, 'margin': 140, 'spacing_after': 60},
+        ]
+
+        max_content_height = self.height - 200  # Extra space for page indicator
+        scaling = self._calculate_adaptive_layout(content_blocks, max_content_height)
+
+        # Create image
+        img = Image.new('RGB', (self.width, self.height), self.bg_color)
+        draw = ImageDraw.Draw(img)
+
+        # Load fonts
+        header_font = ImageFont.truetype(str(self.arabic_font_path), int(54 * scaling['font_scale']), layout_engine=LAYOUT_ENGINE)
+        english_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", int(58 * scaling['font_scale']))
+        reference_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 40)
+        date_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 38)
+        page_indicator_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 32)
+
+        y = 80
+
+        # Page indicator at top
+        page_text = "(Page 2 of 2)"
+        self._draw_centered_text(draw, page_text, y, page_indicator_font, (100, 100, 100))
+        y += 60
+
+        # Bismillah
+        header_display = self._get_display_text(aoozubillah_bismillah, use_raqm=True)
+        y = self._draw_centered_text(draw, header_display, y, header_font, self.text_color)
+        y += int(60 * scaling['spacing_scale'])
+
+        # English translation
+        english_lines = self._wrap_text(english_clean, english_font, self.width - 140)
+        y = self._draw_multiline_centered(draw, english_lines, y, english_font, self.text_color, int(12 * scaling['spacing_scale']))
+        y += int(60 * scaling['spacing_scale'])
+
+        # Reference
+        reference = f"({surah_name} {ayah_number})"
+        y = self._draw_centered_text(draw, reference, y, reference_font, self.text_color)
+
+        # Date (Islamic calendar) at bottom
         adjusted_date = date + timedelta(days=self.hijri_offset_days)
         hijri_date = Gregorian(adjusted_date.year, adjusted_date.month, adjusted_date.day).to_hijri()
         hijri_months = ["", "Muharram", "Safar", "Rabi' al-Awwal", "Rabi' al-Thani",
