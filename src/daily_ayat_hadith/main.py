@@ -131,8 +131,8 @@ def main():
     if hadith.english_translation:
         print(f"English: {hadith.english_translation[:50]}...")
 
-    # Generate hadith image
-    hadith_img = image_gen.generate_hadith_image(
+    # Generate hadith image(s) - returns a list (single-page or multi-page)
+    hadith_images = image_gen.generate_hadith_image(
         hadith_number=hadith.hadith_number,
         arabic_text=hadith.arabic_text,
         urdu_translation=hadith.urdu_translation,
@@ -142,12 +142,23 @@ def main():
         graded_by=hadith.graded_by
     )
 
-    # Save hadith image
-    hadith_filename = f"hadith_mishkaat_{hadith.hadith_number}.png"
-    hadith_output_path = date_output_dir / hadith_filename
-    hadith_img.save(hadith_output_path, quality=95)
+    # Save hadith image(s)
+    print()
+    for page_num, hadith_img in enumerate(hadith_images, 1):
+        if len(hadith_images) == 1:
+            # Single page hadith
+            hadith_filename = f"hadith_mishkaat_{hadith.hadith_number}.png"
+        else:
+            # Multi-page hadith
+            hadith_filename = f"hadith_mishkaat_{hadith.hadith_number}_page{page_num}.png"
 
-    print(f"\n✓ Hadith image saved: {hadith_output_path}")
+        hadith_output_path = date_output_dir / hadith_filename
+        hadith_img.save(hadith_output_path, quality=95)
+
+        if len(hadith_images) == 1:
+            print(f"✓ Hadith image saved: {hadith_output_path}")
+        else:
+            print(f"✓ Hadith page {page_num} saved: {hadith_output_path}")
 
     # Update state with both
     state_manager.update_after_generation(
