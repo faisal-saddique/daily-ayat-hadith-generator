@@ -78,6 +78,8 @@ class IslamicImageGenerator:
         This is needed because English fonts like Helvetica don't support Arabic Unicode characters.
         Handles cases where text may already contain English equivalents to avoid duplicates.
         """
+        import re
+
         replacements = {
             '\uFDFA': '(peace be upon him)',  # ﷺ SALLALLAHU ALAYHI WASALLAM
             '\uFDFD': '',  # ﷺ BISMILLAH AR-RAHMAN AR-RAHEEM
@@ -88,19 +90,34 @@ class IslamicImageGenerator:
         }
 
         for arabic, english in replacements.items():
-            # Only replace if the replacement text doesn't already exist next to the Arabic symbol
-            # This prevents double replacements like "((peace be upon him))"
-            if arabic in text:
-                # Check if the English equivalent already appears adjacent to the Arabic symbol
-                if english and f"{english}{arabic}" in text:
-                    # English already there before symbol, just remove the symbol
-                    text = text.replace(f"{english}{arabic}", english)
-                elif english and f"{arabic}{english}" in text:
-                    # English already there after symbol, just remove the symbol
-                    text = text.replace(f"{arabic}{english}", english)
-                else:
-                    # Normal replacement
-                    text = text.replace(arabic, english)
+            if not arabic or arabic not in text:
+                continue
+
+            if not english:
+                # Just remove the symbol if no replacement text
+                text = text.replace(arabic, english)
+                continue
+
+            # Escape special regex characters in the replacement text for pattern matching
+            english_escaped = re.escape(english)
+            arabic_escaped = re.escape(arabic)
+
+            # Pattern 1: English text followed by optional spaces and the Arabic symbol
+            # Example: "(peace be upon him) ﷺ" or "(peace be upon him)ﷺ"
+            pattern1 = f"{english_escaped}\\s*{arabic_escaped}"
+            if re.search(pattern1, text):
+                text = re.sub(pattern1, english, text)
+                continue
+
+            # Pattern 2: Arabic symbol followed by optional spaces and English text
+            # Example: "ﷺ (peace be upon him)" or "ﷺ(peace be upon him)"
+            pattern2 = f"{arabic_escaped}\\s*{english_escaped}"
+            if re.search(pattern2, text):
+                text = re.sub(pattern2, english, text)
+                continue
+
+            # Pattern 3: No English equivalent nearby, just replace the symbol
+            text = text.replace(arabic, english)
 
         return text
 
