@@ -258,7 +258,17 @@ class HadithProvider:
             return False  # No grading available, allow it
 
         # Check for weak grading indicators
-        weak_indicators = ['ضعیف', 'ضعيف', 'da\'if', 'weak']
+        # Includes various spellings and transliterations from different sources
+        weak_indicators = [
+            'ضعیف',   # Arabic weak (Urdu spelling)
+            'ضعيف',   # Arabic weak (Arabic spelling)
+            'zaeef',  # Urdu/English transliteration (from al-hadees.com)
+            "da'if",  # Arabic transliteration with apostrophe
+            'daif',   # Arabic transliteration without apostrophe
+            'weak',   # English
+            'موضوع',  # Fabricated (Arabic)
+            'mawdu',  # Fabricated (transliteration)
+        ]
         grade_lower = hadith.grade.lower()
 
         for indicator in weak_indicators:

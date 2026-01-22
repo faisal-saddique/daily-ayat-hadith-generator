@@ -61,7 +61,7 @@ class AlHadeesScraper:
         """
         self.collection = collection
         self.timeout = timeout
-        self.base_url = "https://al-hadees.com"
+        self.base_url = "https://www.al-hadees.com"
         self.last_request_time = 0
         self.min_delay = 1.0  # Minimum 1 second between requests
 
@@ -143,50 +143,69 @@ class AlHadeesScraper:
         grade = ""
         graded_by = ""
 
-        # Look for the Status section
-        status_sections = soup.find_all('div', class_='row')
-        for section in status_sections:
-            # Find the section with "Status" or "حکمِ حدیث"
-            headers = section.find_all('h5')
+        # Look for the Status section within mb-5 divs for better accuracy
+        all_mb5_divs = soup.find_all('div', class_='mb-5')
+        for div in all_mb5_divs:
+            # Check if this div contains a Status header
+            headers = div.find_all('h5')
+            has_status_header = False
+
             for header in headers:
-                if 'Status' in header.get_text() or 'حکمِ حدیث' in header.get_text():
-                    # Get the Arabic grade (صحیح) from the Arabic column
-                    # Look for text-success span in the right column
-                    cols = section.find_all('div', class_='col-6')
-                    for col in cols:
-                        # Find the Arabic grade (second col with text-right)
-                        if 'text-right' in col.get('class', []):
-                            grade_elem = col.find('span', class_='text-success')
-                            if grade_elem:
-                                grade = grade_elem.get_text(strip=True)
-                                break
+                header_text = header.get_text(strip=True)
+                if header_text == 'Status' or header_text == 'حکمِ حدیث':
+                    has_status_header = True
+                    break
+
+            if has_status_header:
+                # The grade is in the second row, right column
+                rows = div.find_all('div', class_='row')
+                if len(rows) >= 2:
+                    content_row = rows[1]  # Second row has the actual content
+                    right_col = content_row.find('div', class_='text-right')
+                    if right_col:
+                        # Look for span with text-success (sahih), text-danger (weak), or text-warning (hasan)
+                        grade_elem = right_col.find('span', class_='text-success')
+                        if not grade_elem:
+                            grade_elem = right_col.find('span', class_='text-danger')
+                        if not grade_elem:
+                            grade_elem = right_col.find('span', class_='text-warning')
+
+                        if grade_elem:
+                            grade = grade_elem.get_text(strip=True)
+                            break
 
         # Get Status Reference (حوالہ حکم) - the Arabic reference like (متفق علیہ)
-        ref_headers = soup.find_all('h5')
-        for header in ref_headers:
-            if 'Status Reference' in header.get_text() or 'حوالہ حکم' in header.get_text():
-                parent = header.find_parent('div', class_='mb-5')
-                if parent:
-                    # Get all rows in this section
-                    ref_rows = parent.find_all('div', class_='row')
-                    # The second row (after the header row) contains the actual reference
-                    if len(ref_rows) >= 2:
-                        content_row = ref_rows[1]  # Second row has the content
-                        right_col = content_row.find('div', class_='text-right')
-                        if right_col:
-                            ref_elem = right_col.find('h3', class_='font-arabic2')
-                            if ref_elem:
-                                graded_by_text = ref_elem.get_text(strip=True)
-                                # Only keep the actual grading reference like (متفق علیہ)
-                                if graded_by_text and graded_by_text != grade:
-                                    # Filter out ترقیم and numbers
-                                    if 'ترقیم' not in graded_by_text:
-                                        graded_by = graded_by_text
-                                    else:
-                                        # Extract only parentheses content
-                                        match = re.search(r'\([^)]+\)', graded_by_text)
-                                        if match:
-                                            graded_by = match.group(0)
+        for div in all_mb5_divs:
+            headers = div.find_all('h5')
+            has_status_ref_header = False
+
+            for header in headers:
+                header_text = header.get_text(strip=True)
+                if header_text == 'Status Reference' or header_text == 'حوالہ حکم':
+                    has_status_ref_header = True
+                    break
+
+            if has_status_ref_header:
+                # The reference is in the second row, right column
+                rows = div.find_all('div', class_='row')
+                if len(rows) >= 2:
+                    content_row = rows[1]  # Second row has the content
+                    right_col = content_row.find('div', class_='text-right')
+                    if right_col:
+                        ref_elem = right_col.find('h3', class_='font-arabic2')
+                        if ref_elem:
+                            graded_by_text = ref_elem.get_text(strip=True)
+                            # Only keep the actual grading reference like (متفق علیہ)
+                            if graded_by_text and graded_by_text != grade:
+                                # Filter out ترقیم and numbers
+                                if 'ترقیم' not in graded_by_text:
+                                    graded_by = graded_by_text
+                                else:
+                                    # Extract only parentheses content
+                                    match = re.search(r'\([^)]+\)', graded_by_text)
+                                    if match:
+                                        graded_by = match.group(0)
+                            break
 
         logger.info(f"Successfully scraped hadith {hadith_number} from al-hadees.com")
         logger.debug(f"Grade: {grade}, Graded by: {graded_by}")
