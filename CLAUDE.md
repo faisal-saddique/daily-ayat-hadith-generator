@@ -95,16 +95,26 @@ main.py
   ↓
 StateManager checks if generation needed today
   ↓
-For Ayah: Database.get_next_ayah() → ImageGenerator → Save PNG
+For Ayah: Database.get_next_ayah()
   ↓
 For Hadith: HadithProvider.get_next_hadith()
   ├─ Try Sunnah.com (Arabic + English) + Local DB (Urdu)
   ├─ Fallback: al-hadees.com (Arabic + Urdu) + Local DB or AI (English)
   └─ Final fallback: Local DB only
   ↓
-ImageGenerator → Save PNG
+Create review file: content_review.txt (Arabic + Urdu for both)
   ↓
-StateManager updates state
+Wait for user input
+  ├─ ESC/Ctrl+C → Delete review file → Exit (state NOT updated)
+  └─ ENTER → Continue
+      ↓
+  Parse review file (read edited content)
+      ↓
+  ImageGenerator (uses edited content) → Save PNG files
+      ↓
+  Delete review file
+      ↓
+  StateManager updates state
 ```
 
 ## Configuration
@@ -128,9 +138,12 @@ StateManager updates state
 ```
 output/
   └── YYYY-MM-DD/
+      ├── content_review.txt (temporary - created for review, deleted after generation)
       ├── ayat_SurahName_AyahNumber.png
       └── hadith_mishkaat_HadithNumber.png
 ```
+
+**Note:** `content_review.txt` is a temporary file created before image generation. It contains the ayah and hadith content for manual review/editing. After you press ENTER to continue or ESC to cancel, this file is automatically deleted.
 
 ## Key Implementation Details
 
@@ -167,10 +180,24 @@ python-dotenv>=1.0.0      # Environment variable management
 
 ## Common Tasks
 
-**Test single run:**
+**Run with content review:**
 ```bash
 uv run python -m src.daily_ayat_hadith.main
 ```
+The generator will:
+1. Fetch ayah and hadith content
+2. Create a review file: `output/YYYY-MM-DD/content_review.txt`
+3. Pause and wait for your input:
+   - Press **ENTER** to continue with image generation (uses edited content)
+   - Press **ESC** or **Ctrl+C** to cancel (deletes review file, doesn't update state)
+4. If you continue: generates images, updates state, deletes review file
+
+**Content Review Workflow:**
+1. When prompted, open `output/YYYY-MM-DD/content_review.txt`
+2. Edit Arabic/Urdu text as needed (fix punctuation, etc.)
+3. Save the file
+4. Return to terminal and press **ENTER**
+5. Images will be generated with your edited content
 
 **Force regeneration (reset state):**
 Edit `state.json` and change `last_date` to a past date, or delete the file entirely.

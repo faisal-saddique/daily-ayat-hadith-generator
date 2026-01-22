@@ -18,6 +18,181 @@ logging.basicConfig(
 )
 
 
+def create_review_file(date_output_dir: Path, ayah, hadith) -> Path:
+    """
+    Create a review text file with ayah and hadith content for editing.
+
+    Args:
+        date_output_dir: Output directory for today's date
+        ayah: Ayah object with content
+        hadith: Hadith object with content
+
+    Returns:
+        Path to the created review file
+    """
+    review_file = date_output_dir / "content_review.txt"
+
+    content = f"""# DAILY CONTENT REVIEW
+# Edit the Arabic and Urdu text below as needed
+# Press ENTER when ready to generate images
+# Press ESC to cancel without generating
+
+{'='*80}
+AYAH - {ayah.surah_name} {ayah.ayah_number}
+{'='*80}
+
+[AYAH_ARABIC_START]
+{ayah.arabic_text}
+[AYAH_ARABIC_END]
+
+[AYAH_URDU_START]
+{ayah.urdu_translation}
+[AYAH_URDU_END]
+
+[AYAH_ENGLISH_START]
+{ayah.english_translation}
+[AYAH_ENGLISH_END]
+
+{'='*80}
+HADITH - Mishkaat {hadith.hadith_number}
+{'='*80}
+
+[HADITH_ARABIC_START]
+{hadith.arabic_text}
+[HADITH_ARABIC_END]
+
+[HADITH_URDU_START]
+{hadith.urdu_translation}
+[HADITH_URDU_END]
+
+[HADITH_ENGLISH_START]
+{hadith.english_translation or ''}
+[HADITH_ENGLISH_END]
+
+{'='*80}
+METADATA (DO NOT EDIT)
+{'='*80}
+Surah: {ayah.surah_number}
+Ayah: {ayah.ayah_number}
+Surah Name: {ayah.surah_name}
+Hadith Number: {hadith.hadith_number}
+Hadith Grade: {hadith.grade or 'N/A'}
+Hadith Graded By: {hadith.graded_by or 'N/A'}
+"""
+
+    with open(review_file, 'w', encoding='utf-8') as f:
+        f.write(content)
+
+    return review_file
+
+
+def parse_review_file(review_file: Path) -> dict:
+    """
+    Parse the edited review file and extract content.
+
+    Args:
+        review_file: Path to the review file
+
+    Returns:
+        Dict with ayah and hadith content and metadata
+    """
+    with open(review_file, 'r', encoding='utf-8') as f:
+        content = f.read()
+
+    def extract_section(text: str, start_marker: str, end_marker: str) -> str:
+        """Extract text between markers."""
+        start_idx = text.find(start_marker)
+        end_idx = text.find(end_marker)
+
+        if start_idx == -1 or end_idx == -1:
+            return ""
+
+        # Extract content between markers
+        start_idx += len(start_marker)
+        extracted = text[start_idx:end_idx].strip()
+        return extracted
+
+    # Extract all sections
+    data = {
+        'ayah': {
+            'arabic': extract_section(content, '[AYAH_ARABIC_START]', '[AYAH_ARABIC_END]'),
+            'urdu': extract_section(content, '[AYAH_URDU_START]', '[AYAH_URDU_END]'),
+            'english': extract_section(content, '[AYAH_ENGLISH_START]', '[AYAH_ENGLISH_END]'),
+        },
+        'hadith': {
+            'arabic': extract_section(content, '[HADITH_ARABIC_START]', '[HADITH_ARABIC_END]'),
+            'urdu': extract_section(content, '[HADITH_URDU_START]', '[HADITH_URDU_END]'),
+            'english': extract_section(content, '[HADITH_ENGLISH_START]', '[HADITH_ENGLISH_END]'),
+        },
+        'metadata': {}
+    }
+
+    # Extract metadata
+    metadata_section = content.split("METADATA (DO NOT EDIT)")
+    if len(metadata_section) > 1:
+        metadata_lines = metadata_section[1].strip().split('\n')
+        for line in metadata_lines:
+            if ':' in line and not line.startswith('='):
+                key, value = line.split(':', 1)
+                key = key.strip().lower().replace(' ', '_')
+                data['metadata'][key] = value.strip()
+
+    return data
+
+
+def wait_for_user_input() -> bool:
+    """
+    Wait for user to press Enter or ESC.
+
+    Returns:
+        True if user pressed Enter (continue), False if ESC (cancel)
+    """
+    print()
+    print("=" * 80)
+    print("REVIEW CONTENT")
+    print("=" * 80)
+    print("A review file has been created. Please review and edit the content.")
+    print()
+    print("Options:")
+    print("  - Press ENTER to continue with image generation")
+    print("  - Press ESC (or Ctrl+C) to cancel without generating images")
+    print("=" * 80)
+    print()
+
+    try:
+        # Cross-platform input handling
+        if sys.platform == 'win32':
+            import msvcrt
+            while True:
+                if msvcrt.kbhit():
+                    key = msvcrt.getch()
+                    if key == b'\r':  # Enter
+                        return True
+                    elif key == b'\x1b':  # ESC
+                        return False
+        else:
+            # Unix-like systems (macOS, Linux)
+            import termios
+            import tty
+
+            fd = sys.stdin.fileno()
+            old_settings = termios.tcgetattr(fd)
+            try:
+                tty.setraw(sys.stdin.fileno())
+                while True:
+                    char = sys.stdin.read(1)
+                    if char == '\r' or char == '\n':  # Enter
+                        return True
+                    elif char == '\x1b':  # ESC
+                        return False
+            finally:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+    except KeyboardInterrupt:
+        # Ctrl+C treated as cancel
+        print("\n\nCancelled by user (Ctrl+C)")
+        return False
+
+
 def main():
     """Main entry point."""
     # Setup paths
@@ -78,16 +253,16 @@ def main():
         print(f"Last generated: {current_state.last_date}")
         return
 
-    # Generate BOTH Ayah and Hadith daily
+    # Get current state
     current_state = state_manager.get_current_state()
     today = datetime.now()
 
-    print(f"Generating daily content for {today.date()}...")
+    print(f"Fetching content for {today.date()}...")
     print()
 
-    # Generate Ayah
+    # Fetch Ayah
     print("=" * 50)
-    print("GENERATING AYAH")
+    print("FETCHING AYAH")
     print("=" * 50)
 
     ayah = db.get_next_ayah(current_state.last_surah, current_state.last_ayah)
@@ -95,15 +270,69 @@ def main():
     print(f"\nAyah: {ayah.surah_name} {ayah.ayah_number}")
     print(f"Arabic: {ayah.arabic_text[:50]}...")
     print(f"Urdu: {ayah.urdu_translation[:50]}...")
-    print(f"English: {ayah.english_translation[:50]}...")
 
-    # Generate ayah image(s) - returns a list (single-page or multi-page)
+    # Fetch Hadith
+    print()
+    print("=" * 50)
+    print("FETCHING HADITH")
+    print("=" * 50)
+
+    hadith = hadith_provider.get_next_hadith(current_state.last_hadith)
+
+    print(f"\nHadith: Mishkaat {hadith.hadith_number}")
+    if hadith.grade:
+        print(f"Grading: {hadith.grade} {hadith.graded_by}")
+    print(f"Arabic: {hadith.arabic_text[:50]}...")
+    print(f"Urdu: {hadith.urdu_translation[:50]}...")
+
+    # Create review file
+    print()
+    print("=" * 50)
+    print("CREATING REVIEW FILE")
+    print("=" * 50)
+
+    review_file = create_review_file(date_output_dir, ayah, hadith)
+    print(f"\n✓ Review file created: {review_file}")
+    print(f"\nYou can now edit the content in: {review_file}")
+
+    # Wait for user input
+    should_continue = wait_for_user_input()
+
+    if not should_continue:
+        # User cancelled - clean up and exit
+        print("\n" + "=" * 50)
+        print("CANCELLED - Cleaning up")
+        print("=" * 50)
+
+        if review_file.exists():
+            review_file.unlink()
+            print(f"✓ Deleted review file: {review_file}")
+
+        print("\nNo images generated. State not updated.")
+        hadith_provider.close()
+        return
+
+    # User pressed Enter - continue with generation
+    print("\n" + "=" * 50)
+    print("GENERATING IMAGES")
+    print("=" * 50)
+
+    # Parse the (possibly edited) review file
+    print("\nReading edited content from review file...")
+    edited_content = parse_review_file(review_file)
+
+    # Generate Ayah image with edited content
+    print()
+    print("=" * 50)
+    print("GENERATING AYAH IMAGE")
+    print("=" * 50)
+
     ayah_images = image_gen.generate_ayat_image(
         surah_number=ayah.surah_number,
         ayah_number=ayah.ayah_number,
-        arabic_text=ayah.arabic_text,
-        urdu_translation=ayah.urdu_translation,
-        english_translation=ayah.english_translation,
+        arabic_text=edited_content['ayah']['arabic'],
+        urdu_translation=edited_content['ayah']['urdu'],
+        english_translation=edited_content['ayah']['english'],
         surah_name=ayah.surah_name,
         date=today
     )
@@ -112,10 +341,8 @@ def main():
     print()
     for page_num, ayah_img in enumerate(ayah_images, 1):
         if len(ayah_images) == 1:
-            # Single page ayah
             ayah_filename = f"ayat_{ayah.surah_name.replace(' ', '_')}_{ayah.ayah_number}.png"
         else:
-            # Multi-page ayah
             ayah_filename = f"ayat_{ayah.surah_name.replace(' ', '_')}_{ayah.ayah_number}_page{page_num}.png"
 
         ayah_output_path = date_output_dir / ayah_filename
@@ -126,28 +353,17 @@ def main():
         else:
             print(f"✓ Ayah page {page_num} saved: {ayah_output_path}")
 
-    # Generate Hadith
+    # Generate Hadith image with edited content
     print()
     print("=" * 50)
-    print("GENERATING HADITH")
+    print("GENERATING HADITH IMAGE")
     print("=" * 50)
 
-    hadith = hadith_provider.get_next_hadith(current_state.last_hadith)
-
-    print(f"\nHadith: Mishkaat {hadith.hadith_number}")
-    if hadith.grade:
-        print(f"Grading: {hadith.grade} {hadith.graded_by}")
-    print(f"Arabic: {hadith.arabic_text[:50]}...")
-    print(f"Urdu: {hadith.urdu_translation[:50]}...")
-    if hadith.english_translation:
-        print(f"English: {hadith.english_translation[:50]}...")
-
-    # Generate hadith image(s) - returns a list (single-page or multi-page)
     hadith_images = image_gen.generate_hadith_image(
         hadith_number=hadith.hadith_number,
-        arabic_text=hadith.arabic_text,
-        urdu_translation=hadith.urdu_translation,
-        english_translation=hadith.english_translation,
+        arabic_text=edited_content['hadith']['arabic'],
+        urdu_translation=edited_content['hadith']['urdu'],
+        english_translation=edited_content['hadith']['english'],
         date=today,
         grade=hadith.grade,
         graded_by=hadith.graded_by
@@ -157,10 +373,8 @@ def main():
     print()
     for page_num, hadith_img in enumerate(hadith_images, 1):
         if len(hadith_images) == 1:
-            # Single page hadith
             hadith_filename = f"hadith_mishkaat_{hadith.hadith_number}.png"
         else:
-            # Multi-page hadith
             hadith_filename = f"hadith_mishkaat_{hadith.hadith_number}_page{page_num}.png"
 
         hadith_output_path = date_output_dir / hadith_filename
@@ -170,6 +384,16 @@ def main():
             print(f"✓ Hadith image saved: {hadith_output_path}")
         else:
             print(f"✓ Hadith page {page_num} saved: {hadith_output_path}")
+
+    # Delete review file
+    print()
+    print("=" * 50)
+    print("CLEANING UP")
+    print("=" * 50)
+
+    if review_file.exists():
+        review_file.unlink()
+        print(f"✓ Deleted review file: {review_file}")
 
     # Update state with both
     state_manager.update_after_generation(
