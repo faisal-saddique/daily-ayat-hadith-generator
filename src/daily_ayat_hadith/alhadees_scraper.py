@@ -174,41 +174,14 @@ class AlHadeesScraper:
                             grade = grade_elem.get_text(strip=True)
                             break
 
-        # Get Status Reference (حوالہ حکم) - the Arabic reference like (متفق علیہ)
-        for div in all_mb5_divs:
-            headers = div.find_all('h5')
-            has_status_ref_header = False
-
-            for header in headers:
-                header_text = header.get_text(strip=True)
-                if header_text == 'Status Reference' or header_text == 'حوالہ حکم':
-                    has_status_ref_header = True
-                    break
-
-            if has_status_ref_header:
-                # The reference is in the second row, right column
-                rows = div.find_all('div', class_='row')
-                if len(rows) >= 2:
-                    content_row = rows[1]  # Second row has the content
-                    right_col = content_row.find('div', class_='text-right')
-                    if right_col:
-                        ref_elem = right_col.find('h3', class_='font-arabic2')
-                        if ref_elem:
-                            graded_by_text = ref_elem.get_text(strip=True)
-                            # Only keep the actual grading reference like (متفق علیہ)
-                            if graded_by_text and graded_by_text != grade:
-                                # Filter out ترقیم and numbers
-                                if 'ترقیم' not in graded_by_text:
-                                    graded_by = graded_by_text
-                                else:
-                                    # Extract only parentheses content
-                                    match = re.search(r'\([^)]+\)', graded_by_text)
-                                    if match:
-                                        graded_by = match.group(0)
-                            break
+        # Note: al-hadees.com has a "Status Reference" (حوالہ حکم) section, but it typically
+        # contains another form of the grade (e.g., Arabic script version) rather than
+        # the scholar who graded it. Unlike Sunnah.com which provides actual grader names
+        # like "Al-Albani", al-hadees.com doesn't provide "graded by" information.
+        # So we leave graded_by empty for al-hadees.com data.
 
         logger.info(f"Successfully scraped hadith {hadith_number} from al-hadees.com")
-        logger.debug(f"Grade: {grade}, Graded by: {graded_by}")
+        logger.debug(f"Grade: {grade}")
 
         return AlHadeesScrapedHadith(
             hadith_number=hadith_number,

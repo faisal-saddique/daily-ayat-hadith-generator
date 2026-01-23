@@ -50,6 +50,21 @@ class StateManager:
         today = datetime.now().date().isoformat()
         return today != self.state.last_date
 
+    def should_generate_for_date(self, target_date) -> bool:
+        """Check if we should generate for a specific date.
+
+        Args:
+            target_date: A date object or ISO format string
+
+        Returns:
+            True if the target date is after the last generated date
+        """
+        if hasattr(target_date, 'isoformat'):
+            target_date_str = target_date.isoformat()
+        else:
+            target_date_str = target_date
+        return target_date_str > self.state.last_date
+
     def get_next_content_type(self) -> str:
         """Get the content type for next generation (alternates)."""
         if self.state.content_type == "ayat":
@@ -58,11 +73,25 @@ class StateManager:
             return "ayat"
 
     def update_after_generation(self, content_type: str, surah: int = None,
-                               ayah: int = None, hadith: int = None):
-        """Update state after successful generation."""
-        today = datetime.now().date().isoformat()
+                               ayah: int = None, hadith: int = None,
+                               target_date=None):
+        """Update state after successful generation.
 
-        self.state.last_date = today
+        Args:
+            content_type: Type of content generated ("ayat", "hadith", or "both")
+            surah: Surah number (for ayat content)
+            ayah: Ayah number (for ayat content)
+            hadith: Hadith number (for hadith content)
+            target_date: The date to record (date object or ISO string). Defaults to today.
+        """
+        if target_date is None:
+            date_str = datetime.now().date().isoformat()
+        elif hasattr(target_date, 'isoformat'):
+            date_str = target_date.isoformat()
+        else:
+            date_str = target_date
+
+        self.state.last_date = date_str
         self.state.content_type = content_type
 
         if content_type == "ayat" and surah is not None and ayah is not None:

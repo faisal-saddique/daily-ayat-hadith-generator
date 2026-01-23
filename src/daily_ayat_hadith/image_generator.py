@@ -98,6 +98,25 @@ class IslamicImageGenerator:
                 text = text.replace(arabic, english)
                 continue
 
+            arabic_escaped = re.escape(arabic)
+
+            # Handle case where Arabic symbol is already wrapped in parentheses: (ﷺ) -> (peace be upon him)
+            # This prevents double parentheses like ((peace be upon him))
+            wrapped_pattern = f"\\({arabic_escaped}\\)"
+            if re.search(wrapped_pattern, text):
+                text = re.sub(wrapped_pattern, english, text)
+                continue
+
+        # Second pass for remaining symbols
+        for arabic, english in replacements.items():
+            if not arabic or arabic not in text:
+                continue
+
+            if not english:
+                # Just remove the symbol if no replacement text
+                text = text.replace(arabic, english)
+                continue
+
             # Escape special regex characters in the replacement text for pattern matching
             english_escaped = re.escape(english)
             arabic_escaped = re.escape(arabic)
@@ -560,7 +579,7 @@ class IslamicImageGenerator:
             content_blocks.append({'text': english_clean, 'font_size': 46, 'font_path': '/System/Library/Fonts/Helvetica.ttc', 'type': 'multi', 'line_spacing': 12, 'margin': 150, 'spacing_after': 60})
 
         if grade:
-            grading_text = f"حكم : {grade} {graded_by}"
+            grading_text = f"حكم : {grade}"
             content_blocks.append({'text': self._get_display_text(grading_text, use_raqm=True), 'font_size': 38, 'font_path': self.arabic_font_path, 'type': 'single', 'spacing_after': 50})
 
         max_content_height = self.height - 160
@@ -628,7 +647,7 @@ class IslamicImageGenerator:
 
         # Grading (if available)
         if grade:
-            grading_text = f"حكم : {grade} {graded_by}"
+            grading_text = f"حكم : {grade}"
             grading_display = self._get_display_text(grading_text, use_raqm=True)
             y = self._draw_centered_text(draw, grading_display, y, grading_font, self.text_color)
             y += int(50 * scaling['spacing_scale'])
@@ -678,7 +697,7 @@ class IslamicImageGenerator:
         ]
 
         if grade:
-            grading_text = f"حكم : {grade} {graded_by}"
+            grading_text = f"حكم : {grade}"
             content_blocks.append({'text': self._get_display_text(grading_text, use_raqm=True), 'font_size': 38, 'font_path': self.arabic_font_path, 'type': 'single', 'spacing_after': 50})
 
         max_content_height = self.height - 200  # Extra space for "continued" message
@@ -723,7 +742,7 @@ class IslamicImageGenerator:
 
         # Grading
         if grade:
-            grading_text = f"حكم : {grade} {graded_by}"
+            grading_text = f"حكم : {grade}"
             grading_display = self._get_display_text(grading_text, use_raqm=True)
             y = self._draw_centered_text(draw, grading_display, y, grading_font, self.text_color)
             y += int(50 * scaling['spacing_scale'])
@@ -752,7 +771,7 @@ class IslamicImageGenerator:
         ]
 
         if grade:
-            grading_text = f"حكم : {grade} {graded_by}"
+            grading_text = f"حكم : {grade}"
             content_blocks.append({'text': self._get_display_text(grading_text, use_raqm=True), 'font_size': 38, 'font_path': self.arabic_font_path, 'type': 'single', 'spacing_after': 50})
 
         max_content_height = self.height - 200  # Extra space for page indicator
@@ -789,7 +808,7 @@ class IslamicImageGenerator:
 
         # Grading
         if grade:
-            grading_text = f"حكم : {grade} {graded_by}"
+            grading_text = f"حكم : {grade}"
             grading_display = self._get_display_text(grading_text, use_raqm=True)
             y = self._draw_centered_text(draw, grading_display, y, grading_font, self.text_color)
             y += int(50 * scaling['spacing_scale'])

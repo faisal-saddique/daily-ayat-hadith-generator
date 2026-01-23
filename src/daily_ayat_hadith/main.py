@@ -2,8 +2,9 @@
 
 import sys
 import logging
+import argparse
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta, date
 import json
 
 from .database import IslamicDatabase
@@ -195,71 +196,51 @@ def wait_for_user_input() -> bool:
         return False
 
 
-def main():
-    """Main entry point."""
-    # Setup paths
-    project_root = Path(__file__).parent.parent.parent
-    db_path = project_root / "content.sqlite3"
-    fonts_dir = project_root / "fonts"
-    output_dir = project_root / "output"
-    state_file = project_root / "state.json"
-    config_file = project_root / "config.json"
+def generate_for_date(
+    target_date: date,
+    db: IslamicDatabase,
+    state_manager: StateManager,
+    image_gen: IslamicImageGenerator,
+    hadith_provider: HadithProvider,
+    output_dir: Path,
+    day_num: int = 1,
+    total_days: int = 1
+) -> bool:
+    """
+    Generate Ayah and Hadith images for a specific date.
 
-    # Ensure output directory exists
-    output_dir.mkdir(exist_ok=True)
+    Args:
+        target_date: The date to generate content for
+        db: Database instance
+        state_manager: State manager instance
+        image_gen: Image generator instance
+        hadith_provider: Hadith provider instance
+        output_dir: Base output directory
+        day_num: Current day number (for display)
+        total_days: Total number of days being generated (for display)
 
-    # Create date-specific subfolder for today's output
-    today_date = datetime.now().date()
-    date_output_dir = output_dir / str(today_date)
+    Returns:
+        True if generation was successful, False if cancelled or skipped
+    """
+    # Create date-specific subfolder
+    date_output_dir = output_dir / str(target_date)
     date_output_dir.mkdir(exist_ok=True)
 
-    # Load configuration
-    arabic_font = 'pdms'  # default
-    urdu_translation = 'Maududi'  # default
-    english_translation = 'MaududiEn'  # default
-
-    if config_file.exists():
-        with open(config_file, 'r', encoding='utf-8') as f:
-            config = json.load(f)
-            arabic_font = config.get('fonts', {}).get('arabic', 'pdms')
-            urdu_translation = config.get('translations', {}).get('urdu', 'Maududi')
-            english_translation = config.get('translations', {}).get('english', 'MaududiEn')
-
-    # Initialize components
-    db = IslamicDatabase(
-        db_path,
-        arabic_font=arabic_font,
-        urdu_translation=urdu_translation,
-        english_translation=english_translation
-    )
-    state_manager = StateManager(state_file)
-    image_gen = IslamicImageGenerator(fonts_dir)
-
-    # Initialize hadith provider with configuration
-    hadith_config = HadithProviderConfig.from_config_file(config_file)
-    hadith_provider = HadithProvider(hadith_config, db=db)
-
-    # Display hadith source info
-    source_info = hadith_provider.get_source_info()
-    print(f"Hadith Source: {source_info['mode'].upper()}")
-    if source_info['online_enabled']:
-        print(f"  Collection: {source_info['online_collection']}")
-        print(f"  Mode: Hybrid (Sunnah.com + Local DB)")
-        print(f"  Fallback: {'Enabled' if source_info['fallback_enabled'] else 'Disabled'}")
-    print()
-
-    # Check if we should generate today
-    if not state_manager.should_generate_today():
-        print("Already generated for today!")
-        current_state = state_manager.get_current_state()
-        print(f"Last generated: {current_state.last_date}")
-        return
+    # Check if we should generate for this date
+    if not state_manager.should_generate_for_date(target_date):
+        print(f"Already generated for {target_date}! Skipping...")
+        return False
 
     # Get current state
     current_state = state_manager.get_current_state()
-    today = datetime.now()
 
-    print(f"Fetching content for {today.date()}...")
+    if total_days > 1:
+        print()
+        print("#" * 80)
+        print(f"# DAY {day_num} OF {total_days}: {target_date}")
+        print("#" * 80)
+
+    print(f"\nFetching content for {target_date}...")
     print()
 
     # Fetch Ayah
@@ -312,9 +293,8 @@ def main():
             review_file.unlink()
             print(f"✓ Deleted review file: {review_file}")
 
-        print("\nNo images generated. State not updated.")
-        hadith_provider.close()
-        return
+        print(f"\nNo images generated for {target_date}. State not updated.")
+        return False
 
     # User pressed Enter - continue with generation
     print("\n" + "=" * 50)
@@ -337,6 +317,9 @@ def main():
     else:
         ayah_ref_for_filename = f"{ayah.start_ayah}-{ayah.end_ayah}"
 
+    # Use target_date for the image (converted to datetime for compatibility)
+    target_datetime = datetime.combine(target_date, datetime.min.time())
+
     ayah_images = image_gen.generate_ayat_image(
         surah_number=ayah.surah_number,
         ayah_number=ayah.end_ayah,  # For compatibility
@@ -344,7 +327,7 @@ def main():
         urdu_translation=edited_content['ayah']['urdu'],
         english_translation=edited_content['ayah']['english'],
         surah_name=ayah.surah_name,
-        date=today,
+        date=target_datetime,
         ayah_reference=ayah.reference  # Pass the full reference
     )
 
@@ -375,7 +358,7 @@ def main():
         arabic_text=edited_content['hadith']['arabic'],
         urdu_translation=edited_content['hadith']['urdu'],
         english_translation=edited_content['hadith']['english'],
-        date=today,
+        date=target_datetime,
         grade=hadith.grade,
         graded_by=hadith.graded_by
     )
@@ -407,20 +390,153 @@ def main():
         print(f"✓ Deleted review file: {review_file}")
 
     # Update state with both (use end_ayah so next generation continues from correct position)
+    # Pass target_date so state reflects the date we generated for
     state_manager.update_after_generation(
         content_type="both",
         surah=ayah.surah_number,
         ayah=ayah.end_ayah,
-        hadith=hadith.hadith_number
+        hadith=hadith.hadith_number,
+        target_date=target_date
     )
 
     print()
     print("=" * 50)
-    print("✓ Done! Generated both Ayah and Hadith for today")
+    print(f"✓ Done! Generated both Ayah and Hadith for {target_date}")
     print("=" * 50)
 
-    # Close connections
-    hadith_provider.close()
+    return True
+
+
+def main():
+    """Main entry point."""
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(
+        description="Generate daily Ayah and Hadith images",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s              Generate for today only
+  %(prog)s --days 3     Generate for today and next 2 days
+  %(prog)s -d 7         Generate for a week (today + 6 days)
+"""
+    )
+    parser.add_argument(
+        '-d', '--days',
+        type=int,
+        default=1,
+        metavar='N',
+        help='Number of days to generate (default: 1 for today only)'
+    )
+    args = parser.parse_args()
+
+    num_days = args.days
+    if num_days < 1:
+        print("Error: Number of days must be at least 1")
+        sys.exit(1)
+
+    # Setup paths
+    project_root = Path(__file__).parent.parent.parent
+    db_path = project_root / "content.sqlite3"
+    fonts_dir = project_root / "fonts"
+    output_dir = project_root / "output"
+    state_file = project_root / "state.json"
+    config_file = project_root / "config.json"
+
+    # Ensure output directory exists
+    output_dir.mkdir(exist_ok=True)
+
+    # Load configuration
+    arabic_font = 'pdms'  # default
+    urdu_translation = 'Maududi'  # default
+    english_translation = 'MaududiEn'  # default
+
+    if config_file.exists():
+        with open(config_file, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+            arabic_font = config.get('fonts', {}).get('arabic', 'pdms')
+            urdu_translation = config.get('translations', {}).get('urdu', 'Maududi')
+            english_translation = config.get('translations', {}).get('english', 'MaududiEn')
+
+    # Initialize components
+    db = IslamicDatabase(
+        db_path,
+        arabic_font=arabic_font,
+        urdu_translation=urdu_translation,
+        english_translation=english_translation
+    )
+    state_manager = StateManager(state_file)
+    image_gen = IslamicImageGenerator(fonts_dir)
+
+    # Initialize hadith provider with configuration
+    hadith_config = HadithProviderConfig.from_config_file(config_file)
+    hadith_provider = HadithProvider(hadith_config, db=db)
+
+    # Display hadith source info
+    source_info = hadith_provider.get_source_info()
+    print(f"Hadith Source: {source_info['mode'].upper()}")
+    if source_info['online_enabled']:
+        print(f"  Collection: {source_info['online_collection']}")
+        print(f"  Mode: Hybrid (Sunnah.com + Local DB)")
+        print(f"  Fallback: {'Enabled' if source_info['fallback_enabled'] else 'Disabled'}")
+    print()
+
+    # Generate dates to process
+    today = datetime.now().date()
+    dates_to_generate = [today + timedelta(days=i) for i in range(num_days)]
+
+    if num_days > 1:
+        print(f"Generating content for {num_days} days:")
+        for d in dates_to_generate:
+            print(f"  - {d}")
+        print()
+
+    # Track results
+    successful = 0
+    skipped = 0
+    cancelled = False
+
+    try:
+        for day_num, target_date in enumerate(dates_to_generate, 1):
+            success = generate_for_date(
+                target_date=target_date,
+                db=db,
+                state_manager=state_manager,
+                image_gen=image_gen,
+                hadith_provider=hadith_provider,
+                output_dir=output_dir,
+                day_num=day_num,
+                total_days=num_days
+            )
+
+            if success:
+                successful += 1
+            else:
+                # Check if it was skipped (already generated) or cancelled
+                if state_manager.should_generate_for_date(target_date):
+                    # Still needs generation, so user cancelled
+                    cancelled = True
+                    break
+                else:
+                    skipped += 1
+
+    except KeyboardInterrupt:
+        print("\n\nInterrupted by user")
+        cancelled = True
+    finally:
+        # Close connections
+        hadith_provider.close()
+
+    # Print summary
+    print()
+    print("=" * 80)
+    print("SUMMARY")
+    print("=" * 80)
+    print(f"Days requested: {num_days}")
+    print(f"Successfully generated: {successful}")
+    print(f"Skipped (already generated): {skipped}")
+    if cancelled:
+        print(f"Remaining (cancelled): {num_days - successful - skipped}")
+    print("=" * 80)
 
 
 if __name__ == "__main__":
