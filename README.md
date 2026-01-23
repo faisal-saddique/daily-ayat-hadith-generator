@@ -5,6 +5,8 @@ An automated system that generates beautiful Islamic graphics featuring daily Qu
 ## Features
 
 - **Daily Content Generation**: Automatically generates both Ayat and Hadith every day
+- **Multi-Day Generation**: Generate content for multiple days in advance with `--days` argument
+- **Content Review Workflow**: Edit Arabic/Urdu text before image generation for quality control
 - **Beautiful Image Output**: Creates 1080x1920 PNG images optimized for social media sharing
 - **Multi-Language Support**:
   - Arabic (source text with 4 font variants)
@@ -16,6 +18,7 @@ An automated system that generates beautiful Islamic graphics featuring daily Qu
   - Fallback: Local database
 - **AI-Powered Translation**: Uses Google Gemini/OpenAI to generate missing English translations
 - **Quality Assurance**: Automatically filters weak hadiths, showing only authentic traditions
+- **Smart Ayah Combining**: Automatically combines short consecutive ayahs for better visual layout
 - **Islamic Calendar**: Displays Hijri dates with configurable offset
 - **Proper Text Rendering**: Supports complex Arabic/Urdu typography with adaptive layouts
 - **State Management**: Tracks progress and prevents duplicate generations
@@ -70,25 +73,57 @@ cp .env.example .env
 
 ## Usage
 
-### Manual Execution
+### Basic Usage
 
-**Option 1: Using uv (recommended)**
+**Generate for today (default)**
 ```bash
 uv run python -m src.daily_ayat_hadith.main
 ```
 
-**Option 2: Activate venv first**
+**Generate for multiple days in advance**
+```bash
+# Generate for today and the next 2 days (3 total)
+uv run python -m src.daily_ayat_hadith.main --days 3
+
+# Generate for a full week
+uv run python -m src.daily_ayat_hadith.main -d 7
+```
+
+### Command Line Options
+
+```
+usage: main.py [-h] [-d N]
+
+options:
+  -h, --help    show this help message and exit
+  -d, --days N  Number of days to generate (default: 1 for today only)
+```
+
+### Content Review Workflow
+
+When you run the generator, it follows an interactive workflow:
+
+1. **Fetch Content**: Retrieves the next Ayah and Hadith from configured sources
+2. **Create Review File**: Saves content to `output/YYYY-MM-DD/content_review.txt`
+3. **Wait for Input**: Pauses for you to review/edit the content
+   - Press **ENTER** to continue with image generation
+   - Press **ESC** or **Ctrl+C** to cancel (no images generated, state unchanged)
+4. **Generate Images**: Creates PNG files using the (possibly edited) content
+5. **Cleanup**: Deletes the review file and updates state
+
+This workflow allows you to:
+- Fix typos or punctuation in Arabic/Urdu text
+- Review content before publishing
+- Cancel if the content isn't suitable
+
+When generating multiple days, this workflow repeats for each day.
+
+### Alternative: Activate venv first
+
 ```bash
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 python -m src.daily_ayat_hadith.main
 ```
-
-This will:
-- Check if content has already been generated today
-- Generate a Quranic verse image
-- Generate a Hadith image
-- Save images to `output/YYYY-MM-DD/`
-- Update the state to track progress
 
 ### Automated Daily Execution
 
@@ -177,8 +212,9 @@ daily_ayat_and_hadith/
 ├── fonts/                      # Arabic & Urdu fonts
 ├── output/                     # Generated images by date
 │   └── YYYY-MM-DD/
-│       ├── ayat_*.png
-│       └── hadith_*.png
+│       ├── content_review.txt  # Temporary review file (deleted after generation)
+│       ├── ayat_SurahName_AyahNumber.png
+│       └── hadith_mishkaat_HadithNumber.png
 └── src/daily_ayat_hadith/
     ├── main.py                 # Main generation logic
     ├── state.py                # State management
@@ -212,13 +248,16 @@ When a hadith lacks an English translation:
 
 ### Image Generation Process
 
-1. Fetches content (Ayat or Hadith) from database/online sources
-2. Retrieves translations in selected languages
-3. Converts Gregorian date to Hijri (Islamic) date
-4. Measures text and calculates optimal font sizes
-5. Renders Arabic/Urdu text with proper text shaping (RAQM)
-6. Applies adaptive layout to fit content beautifully
-7. Saves high-quality PNG to dated output directory
+1. Fetches content (Ayat and Hadith) from database/online sources
+2. Creates review file for manual editing opportunity
+3. Waits for user approval (ENTER to continue, ESC to cancel)
+4. Parses edited content from review file
+5. Converts Gregorian date to Hijri (Islamic) date for Ayat images
+6. Measures text and calculates optimal font sizes
+7. Renders Arabic/Urdu text with proper text shaping (RAQM)
+8. Applies adaptive layout to fit content beautifully
+9. Saves high-quality PNG to dated output directory
+10. Cleans up review file and updates state
 
 ### Quality Control
 
@@ -234,13 +273,14 @@ Generated images include:
 - Arabic text with proper calligraphy
 - Urdu translation
 - English translation
-- Hadith grading (for hadith images)
-- Islamic date reference
+- Hadith grading status (Sahih/Hasan)
+- Date (Hijri for Ayat, Gregorian for Hadith)
 - Source reference (Surah:Ayah or Hadith number)
 
 Images are saved as:
-- `output/2026-01-17/ayat_3_71.png` (Surah 3, Ayah 71)
-- `output/2026-01-17/hadith_mishkat_4636.png` (Hadith 4636)
+- `output/2026-01-17/ayat_Aal-i-Imraan_71.png` (Surah Aal-i-Imraan, Ayah 71)
+- `output/2026-01-17/ayat_Aal-i-Imraan_74-77.png` (Combined short ayahs 74-77)
+- `output/2026-01-17/hadith_mishkaat_4636.png` (Mishkaat Hadith 4636)
 
 ## Dependencies
 
