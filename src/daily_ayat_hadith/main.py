@@ -38,7 +38,7 @@ def create_review_file(date_output_dir: Path, ayah, hadith) -> Path:
 # Press ESC to cancel without generating
 
 {'='*80}
-AYAH - {ayah.surah_name} {ayah.ayah_number}
+AYAH - {ayah.reference}
 {'='*80}
 
 [AYAH_ARABIC_START]
@@ -73,7 +73,9 @@ HADITH - Mishkaat {hadith.hadith_number}
 METADATA (DO NOT EDIT)
 {'='*80}
 Surah: {ayah.surah_number}
-Ayah: {ayah.ayah_number}
+Start Ayah: {ayah.start_ayah}
+End Ayah: {ayah.end_ayah}
+Ayah Count: {ayah.ayah_count}
 Surah Name: {ayah.surah_name}
 Hadith Number: {hadith.hadith_number}
 Hadith Grade: {hadith.grade or 'N/A'}
@@ -267,7 +269,9 @@ def main():
 
     ayah = db.get_next_ayah(current_state.last_surah, current_state.last_ayah)
 
-    print(f"\nAyah: {ayah.surah_name} {ayah.ayah_number}")
+    print(f"\nAyah: {ayah.reference}")
+    if ayah.ayah_count > 1:
+        print(f"  (Combined {ayah.ayah_count} short ayahs)")
     print(f"Arabic: {ayah.arabic_text[:50]}...")
     print(f"Urdu: {ayah.urdu_translation[:50]}...")
 
@@ -327,23 +331,30 @@ def main():
     print("GENERATING AYAH IMAGE")
     print("=" * 50)
 
+    # Create ayah reference for filename and image
+    if ayah.start_ayah == ayah.end_ayah:
+        ayah_ref_for_filename = str(ayah.start_ayah)
+    else:
+        ayah_ref_for_filename = f"{ayah.start_ayah}-{ayah.end_ayah}"
+
     ayah_images = image_gen.generate_ayat_image(
         surah_number=ayah.surah_number,
-        ayah_number=ayah.ayah_number,
+        ayah_number=ayah.end_ayah,  # For compatibility
         arabic_text=edited_content['ayah']['arabic'],
         urdu_translation=edited_content['ayah']['urdu'],
         english_translation=edited_content['ayah']['english'],
         surah_name=ayah.surah_name,
-        date=today
+        date=today,
+        ayah_reference=ayah.reference  # Pass the full reference
     )
 
     # Save ayah image(s)
     print()
     for page_num, ayah_img in enumerate(ayah_images, 1):
         if len(ayah_images) == 1:
-            ayah_filename = f"ayat_{ayah.surah_name.replace(' ', '_')}_{ayah.ayah_number}.png"
+            ayah_filename = f"ayat_{ayah.surah_name.replace(' ', '_')}_{ayah_ref_for_filename}.png"
         else:
-            ayah_filename = f"ayat_{ayah.surah_name.replace(' ', '_')}_{ayah.ayah_number}_page{page_num}.png"
+            ayah_filename = f"ayat_{ayah.surah_name.replace(' ', '_')}_{ayah_ref_for_filename}_page{page_num}.png"
 
         ayah_output_path = date_output_dir / ayah_filename
         ayah_img.save(ayah_output_path, quality=95)
@@ -395,11 +406,11 @@ def main():
         review_file.unlink()
         print(f"✓ Deleted review file: {review_file}")
 
-    # Update state with both
+    # Update state with both (use end_ayah so next generation continues from correct position)
     state_manager.update_after_generation(
         content_type="both",
         surah=ayah.surah_number,
-        ayah=ayah.ayah_number,
+        ayah=ayah.end_ayah,
         hadith=hadith.hadith_number
     )
 

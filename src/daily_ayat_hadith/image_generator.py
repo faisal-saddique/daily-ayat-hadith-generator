@@ -292,8 +292,17 @@ class IslamicImageGenerator:
     def generate_ayat_image(self, surah_number: int, ayah_number: int,
                            arabic_text: str, urdu_translation: str,
                            english_translation: str, surah_name: str,
-                           date: datetime) -> list[Image.Image]:
-        """Generate Ayat image(s). Returns a list of images - single image for short ayat, two images for long ones."""
+                           date: datetime, ayah_reference: str = None) -> list[Image.Image]:
+        """Generate Ayat image(s). Returns a list of images - single image for short ayat, two images for long ones.
+
+        Args:
+            ayah_reference: Optional custom reference string (e.g., "Al-Fatiha 1-3" for combined ayahs).
+                           If not provided, uses "{surah_name} {ayah_number}".
+        """
+
+        # Use provided reference or construct default
+        if ayah_reference is None:
+            ayah_reference = f"{surah_name} {ayah_number}"
 
         aoozubillah_bismillah = "أَعُوذُ بِاللَّهِ مِنَ الشَّيْطَانِ الرَّجِيمِ ۞ بِسۡمِ اللّٰهِ الرَّحۡمٰنِ الرَّحِیۡمِ ۞"
         arabic_with_symbol = arabic_text + " ۞"
@@ -314,19 +323,19 @@ class IslamicImageGenerator:
         if scaling['font_scale'] < 0.75:
             return self._generate_ayat_multipage(
                 surah_number, ayah_number, arabic_text, urdu_translation,
-                english_translation, surah_name, date
+                english_translation, surah_name, date, ayah_reference
             )
 
         # Otherwise use single-page layout
         return [self._generate_ayat_single_page(
             surah_number, ayah_number, arabic_text, urdu_translation,
-            english_translation, surah_name, date, scaling
+            english_translation, surah_name, date, scaling, ayah_reference
         )]
 
     def _generate_ayat_single_page(self, surah_number: int, ayah_number: int,
                                    arabic_text: str, urdu_translation: str,
                                    english_translation: str, surah_name: str,
-                                   date: datetime, scaling: dict) -> Image.Image:
+                                   date: datetime, scaling: dict, ayah_reference: str) -> Image.Image:
         """Generate a single-page ayat image."""
 
         # Create image
@@ -369,8 +378,8 @@ class IslamicImageGenerator:
         y = self._draw_multiline_centered(draw, english_lines, y, english_font, self.text_color, int(12 * scaling['spacing_scale']))
         y += int(60 * scaling['spacing_scale'])
 
-        # Reference
-        reference = f"({surah_name} {ayah_number})"
+        # Reference (use provided ayah_reference)
+        reference = f"({ayah_reference})"
         y = self._draw_centered_text(draw, reference, y, reference_font, self.text_color)
 
         # Date (Islamic calendar) at fixed bottom position
@@ -388,7 +397,7 @@ class IslamicImageGenerator:
     def _generate_ayat_multipage(self, surah_number: int, ayah_number: int,
                                 arabic_text: str, urdu_translation: str,
                                 english_translation: str, surah_name: str,
-                                date: datetime) -> list[Image.Image]:
+                                date: datetime, ayah_reference: str) -> list[Image.Image]:
         """Generate two-page ayat layout for very long verses.
 
         Page 1: Arabic + Urdu
@@ -397,19 +406,19 @@ class IslamicImageGenerator:
 
         # PAGE 1: Arabic + Urdu
         page1 = self._generate_ayat_page1(
-            surah_number, ayah_number, arabic_text, urdu_translation, surah_name
+            surah_number, ayah_number, arabic_text, urdu_translation, surah_name, ayah_reference
         )
 
         # PAGE 2: English
         page2 = self._generate_ayat_page2(
-            surah_number, ayah_number, english_translation, surah_name, date
+            surah_number, ayah_number, english_translation, surah_name, date, ayah_reference
         )
 
         return [page1, page2]
 
     def _generate_ayat_page1(self, surah_number: int, ayah_number: int,
                             arabic_text: str, urdu_translation: str,
-                            surah_name: str) -> Image.Image:
+                            surah_name: str, ayah_reference: str) -> Image.Image:
         """Generate page 1 of multi-page ayat: Arabic + Urdu."""
 
         aoozubillah_bismillah = "أَعُوذُ بِاللَّهِ مِنَ الشَّيْطَانِ الرَّجِيمِ ۞ بِسۡمِ اللّٰهِ الرَّحۡمٰنِ الرَّحِیۡمِ ۞"
@@ -461,8 +470,8 @@ class IslamicImageGenerator:
         y = self._draw_multiline_centered(draw, urdu_lines, y, urdu_font, self.text_color, int(15 * scaling['spacing_scale']))
         y += int(60 * scaling['spacing_scale'])
 
-        # Reference
-        reference = f"({surah_name} {ayah_number})"
+        # Reference (use provided ayah_reference)
+        reference = f"({ayah_reference})"
         y = self._draw_centered_text(draw, reference, y, reference_font, self.text_color)
 
         # Continuation indicator at bottom
@@ -473,7 +482,7 @@ class IslamicImageGenerator:
 
     def _generate_ayat_page2(self, surah_number: int, ayah_number: int,
                             english_translation: str, surah_name: str,
-                            date: datetime) -> Image.Image:
+                            date: datetime, ayah_reference: str) -> Image.Image:
         """Generate page 2 of multi-page ayat: English translation."""
 
         aoozubillah_bismillah = "أَعُوذُ بِاللَّهِ مِنَ الشَّيْطَانِ الرَّجِيمِ ۞ بِسۡمِ اللّٰهِ الرَّحۡمٰنِ الرَّحِیۡمِ ۞"
@@ -516,8 +525,8 @@ class IslamicImageGenerator:
         y = self._draw_multiline_centered(draw, english_lines, y, english_font, self.text_color, int(12 * scaling['spacing_scale']))
         y += int(60 * scaling['spacing_scale'])
 
-        # Reference
-        reference = f"({surah_name} {ayah_number})"
+        # Reference (use provided ayah_reference)
+        reference = f"({ayah_reference})"
         y = self._draw_centered_text(draw, reference, y, reference_font, self.text_color)
 
         # Date (Islamic calendar) at bottom
