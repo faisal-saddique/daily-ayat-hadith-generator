@@ -70,12 +70,19 @@ CRITICAL REQUIREMENTS:
 4. Use formal, respectful language appropriate for prophetic traditions
 5. When the Prophet Muhammad ﷺ is mentioned, use "Allah's Messenger" or "the Messenger of Allah"
 6. Preserve Islamic terminology (use transliterations where appropriate)
-7. Translate the COMPLETE text provided, including:
+7. ALWAYS use proper transliteration with MACRONS for Arabic names and terms:
+   - Use macrons (ā, ī, ū) to indicate long vowels in Arabic transliterations
+   - Examples: Abū (أبو), Salām (سلام), Dāwūd (داود), ʿĀʾishah (عائشة), Ḥadīth (حديث)
+   - Common terms: Salāh (صلاة), Zakāh (زكاة), Ṣaḥābah (صحابة), Sunnah (سنة)
+   - Narrator names: Abū Hurayrah, Ibn ʿUmar, ʿAbdullāh, Muḥammad
+   - Use ʿ (ʿayn) and ʾ (hamzah) for proper transliteration when appropriate
+   - This ensures proper pronunciation and scholarly accuracy
+8. Translate the COMPLETE text provided, including:
    - The prophetic statement or narration
    - Narrator attributions (رواه، أخرجه، etc.)
    - Chain of transmission references
    - Any contextual notes that are part of the original text
-8. Do NOT translate modern scholarly grading/authentication unless it's part of the original Arabic
+9. Do NOT translate modern scholarly grading/authentication unless it's part of the original Arabic
 
 TRANSLATION APPROACH:
 1. Read the Arabic text carefully
