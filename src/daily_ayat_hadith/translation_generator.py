@@ -25,7 +25,7 @@ class HadithTranslation(BaseModel):
 
 
 class TranslationGenerator:
-    """AI-powered translation generator using Pydantic AI."""
+    """AI-powered translation generator using Pydantic AI with automatic API key rotation."""
 
     def __init__(self, model: str = "gemini-1.5-flash", api_key: Optional[str] = None):
         """
@@ -34,6 +34,7 @@ class TranslationGenerator:
         Args:
             model: Model to use (gemini-1.5-flash, gemini-1.5-pro, openai:gpt-4, etc.)
             api_key: API key for the model (defaults to GEMINI_API_KEY or OPENAI_API_KEY from env)
+                    Can be a single key or comma-separated keys for rotation
         """
         self.model = model
 
@@ -50,11 +51,15 @@ class TranslationGenerator:
                 "Set GEMINI_API_KEY or OPENAI_API_KEY in .env file"
             )
 
-        # Create Pydantic AI agent with structured output
-        self.agent = Agent(
-            model,
-            output_type=HadithTranslation,
-            instructions="""You are an expert Islamic scholar and translator specializing in hadith translation.
+        # Parse multiple API keys (comma-separated)
+        self.api_keys = [key.strip() for key in api_key.split(",") if key.strip()]
+        self.current_key_index = 0
+
+        if len(self.api_keys) > 1:
+            logger.info(f"Loaded {len(self.api_keys)} API keys for rotation")
+
+        # Store instructions for reuse when creating agents
+        self.instructions = """You are an expert Islamic scholar and translator specializing in hadith translation.
 Your task is to provide ACCURATE and AUTHENTIC English translations of Arabic hadith texts.
 
 CRITICAL REQUIREMENTS:
@@ -94,7 +99,63 @@ If you're uncertain about any part of the translation, indicate "medium" or "low
 Only mark as "high" confidence if you're completely certain of the accuracy.
 
 This translation will be shared publicly, so it MUST be accurate and authentic."""
+
+        # Create initial agent with first API key
+        self.agent = Agent(
+            model,
+            output_type=HadithTranslation,
+            instructions=self.instructions
         )
+
+    def _get_current_api_key(self) -> str:
+        """Get the current API key being used."""
+        return self.api_keys[self.current_key_index]
+
+    def _rotate_api_key(self) -> bool:
+        """
+        Rotate to the next API key.
+
+        Returns:
+            True if rotation successful, False if all keys exhausted
+        """
+        self.current_key_index += 1
+        if self.current_key_index >= len(self.api_keys):
+            return False  # All keys exhausted
+
+        logger.info(
+            f"Rotating to API key {self.current_key_index + 1}/{len(self.api_keys)}"
+        )
+        return True
+
+    def _is_rate_limit_error(self, error: Exception) -> bool:
+        """Check if the error is a rate limit error (429)."""
+        error_str = str(error).lower()
+        return "429" in error_str or "rate limit" in error_str or "quota exceeded" in error_str
+
+    def _create_agent_with_key(self, api_key: str) -> Agent:
+        """Create a new agent instance with the specified API key."""
+        # Temporarily set the API key in the environment
+        old_key = None
+        env_var = "GEMINI_API_KEY" if self.model.startswith("gemini") else "OPENAI_API_KEY"
+
+        if env_var in os.environ:
+            old_key = os.environ[env_var]
+
+        os.environ[env_var] = api_key
+
+        try:
+            agent = Agent(
+                self.model,
+                output_type=HadithTranslation,
+                instructions=self.instructions
+            )
+            return agent
+        finally:
+            # Restore old key if it existed
+            if old_key is not None:
+                os.environ[env_var] = old_key
+            elif env_var in os.environ:
+                del os.environ[env_var]
 
     def generate_translation(
         self,
@@ -103,7 +164,7 @@ This translation will be shared publicly, so it MUST be accurate and authentic."
         hadith_number: Optional[int] = None
     ) -> HadithTranslation:
         """
-        Generate English translation for Arabic hadith text.
+        Generate English translation for Arabic hadith text with automatic API key rotation.
 
         Args:
             arabic_text: Arabic text of the hadith
@@ -114,7 +175,7 @@ This translation will be shared publicly, so it MUST be accurate and authentic."
             HadithTranslation object with translation and confidence level
 
         Raises:
-            Exception: If translation generation fails
+            Exception: If translation generation fails with all API keys
         """
         prompt_parts = [
             "Translate the following Arabic hadith text to English:\n",
@@ -131,26 +192,54 @@ This translation will be shared publicly, so it MUST be accurate and authentic."
         log_context = f"hadith {hadith_number}" if hadith_number else "hadith"
         logger.info(f"Generating AI translation for {log_context} using {self.model}")
 
-        try:
-            result = self.agent.run_sync(prompt)
-            translation = result.output
+        # Try all API keys in sequence
+        last_error = None
+        for attempt in range(len(self.api_keys)):
+            current_key = self._get_current_api_key()
 
-            logger.info(
-                f"AI translation generated for {log_context} "
-                f"(confidence: {translation.confidence})"
-            )
+            try:
+                # Create agent with current API key
+                agent = self._create_agent_with_key(current_key)
+                result = agent.run_sync(prompt)
+                translation = result.output
 
-            if translation.confidence != "high":
-                logger.warning(
-                    f"AI translation has {translation.confidence} confidence for {log_context}. "
-                    "Manual review recommended."
+                logger.info(
+                    f"AI translation generated for {log_context} "
+                    f"(confidence: {translation.confidence})"
                 )
 
-            return translation
+                if translation.confidence != "high":
+                    logger.warning(
+                        f"AI translation has {translation.confidence} confidence for {log_context}. "
+                        "Manual review recommended."
+                    )
 
-        except Exception as e:
-            logger.error(f"Failed to generate AI translation for {log_context}: {e}")
-            raise Exception(f"AI translation failed: {str(e)}")
+                return translation
+
+            except Exception as e:
+                last_error = e
+
+                # Check if it's a rate limit error
+                if self._is_rate_limit_error(e):
+                    logger.warning(
+                        f"Rate limit hit for API key {self.current_key_index + 1}/{len(self.api_keys)}: {e}"
+                    )
+
+                    # Try to rotate to next key
+                    if self._rotate_api_key():
+                        logger.info(f"Retrying with next API key...")
+                        continue
+                    else:
+                        logger.error(f"All {len(self.api_keys)} API keys exhausted due to rate limits")
+                        raise Exception(f"All API keys exhausted: {str(e)}")
+                else:
+                    # Not a rate limit error, don't retry
+                    logger.error(f"Failed to generate AI translation for {log_context}: {e}")
+                    raise Exception(f"AI translation failed: {str(e)}")
+
+        # If we get here, all attempts failed
+        logger.error(f"Failed to generate AI translation for {log_context} after {len(self.api_keys)} attempts")
+        raise Exception(f"AI translation failed: {str(last_error)}")
 
     def get_english_translation(
         self,

@@ -157,6 +157,8 @@ class HadithProvider:
 
         Gets Arabic, Urdu, and grading from al-hadees.com.
         For English: tries local DB first, then AI translation if enabled.
+
+        Note: AI translation is only generated for non-weak hadiths to preserve tokens.
         """
         english_translation = ""
 
@@ -170,18 +172,35 @@ class HadithProvider:
             except Exception as e:
                 logger.debug(f"Could not fetch English from local DB: {e}")
 
-        # If no English translation found and AI is enabled, generate one
+        # Check if hadith is weak BEFORE generating AI translation
+        # Create temporary Hadith object to check weakness
+        temp_hadith = Hadith(
+            hadith_number=scraped.hadith_number,
+            arabic_text=scraped.arabic_text,
+            urdu_translation=scraped.urdu_translation,
+            english_translation=english_translation,
+            grade=scraped.grade,
+            graded_by=scraped.graded_by
+        )
+
+        # Only generate AI translation if:
+        # 1. No English translation found in DB
+        # 2. AI is enabled
+        # 3. Hadith is NOT weak (to preserve tokens)
         if not english_translation and self.translation_generator:
-            try:
-                logger.info(f"Generating AI English translation for hadith {scraped.hadith_number}")
-                english_translation = self.translation_generator.get_english_translation(
-                    arabic_text=scraped.arabic_text,
-                    urdu_translation=scraped.urdu_translation,
-                    hadith_number=scraped.hadith_number
-                )
-                logger.info(f"AI translation generated successfully for hadith {scraped.hadith_number}")
-            except Exception as e:
-                logger.warning(f"AI translation failed for hadith {scraped.hadith_number}: {e}")
+            if self._is_weak_hadith(temp_hadith):
+                logger.info(f"Skipping AI translation for weak hadith {scraped.hadith_number}: {scraped.grade}")
+            else:
+                try:
+                    logger.info(f"Generating AI English translation for hadith {scraped.hadith_number}")
+                    english_translation = self.translation_generator.get_english_translation(
+                        arabic_text=scraped.arabic_text,
+                        urdu_translation=scraped.urdu_translation,
+                        hadith_number=scraped.hadith_number
+                    )
+                    logger.info(f"AI translation generated successfully for hadith {scraped.hadith_number}")
+                except Exception as e:
+                    logger.warning(f"AI translation failed for hadith {scraped.hadith_number}: {e}")
 
         return Hadith(
             hadith_number=scraped.hadith_number,
