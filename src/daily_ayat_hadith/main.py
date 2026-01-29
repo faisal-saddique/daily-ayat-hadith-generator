@@ -204,7 +204,8 @@ def generate_for_date(
     hadith_provider: HadithProvider,
     output_dir: Path,
     day_num: int = 1,
-    total_days: int = 1
+    total_days: int = 1,
+    skip_review: bool = False
 ) -> bool:
     """
     Generate Ayah and Hadith images for a specific date.
@@ -270,40 +271,62 @@ def generate_for_date(
     print(f"Arabic: {hadith.arabic_text[:50]}...")
     print(f"Urdu: {hadith.urdu_translation[:50]}...")
 
-    # Create review file
-    print()
-    print("=" * 50)
-    print("CREATING REVIEW FILE")
-    print("=" * 50)
-
-    review_file = create_review_file(date_output_dir, ayah, hadith)
-    print(f"\n✓ Review file created: {review_file}")
-    print(f"\nYou can now edit the content in: {review_file}")
-
-    # Wait for user input
-    should_continue = wait_for_user_input()
-
-    if not should_continue:
-        # User cancelled - clean up and exit
-        print("\n" + "=" * 50)
-        print("CANCELLED - Cleaning up")
+    # Create review file or use content directly
+    review_file = None
+    if skip_review:
+        # Skip review - use content directly
+        print()
+        print("=" * 50)
+        print("GENERATING IMAGES (review skipped)")
         print("=" * 50)
 
-        if review_file.exists():
-            review_file.unlink()
-            print(f"✓ Deleted review file: {review_file}")
+        edited_content = {
+            'ayah': {
+                'arabic': ayah.arabic_text,
+                'urdu': ayah.urdu_translation,
+                'english': ayah.english_translation,
+            },
+            'hadith': {
+                'arabic': hadith.arabic_text,
+                'urdu': hadith.urdu_translation,
+                'english': hadith.english_translation or '',
+            }
+        }
+    else:
+        # Normal flow with review
+        print()
+        print("=" * 50)
+        print("CREATING REVIEW FILE")
+        print("=" * 50)
 
-        print(f"\nNo images generated for {target_date}. State not updated.")
-        return False
+        review_file = create_review_file(date_output_dir, ayah, hadith)
+        print(f"\n✓ Review file created: {review_file}")
+        print(f"\nYou can now edit the content in: {review_file}")
 
-    # User pressed Enter - continue with generation
-    print("\n" + "=" * 50)
-    print("GENERATING IMAGES")
-    print("=" * 50)
+        # Wait for user input
+        should_continue = wait_for_user_input()
 
-    # Parse the (possibly edited) review file
-    print("\nReading edited content from review file...")
-    edited_content = parse_review_file(review_file)
+        if not should_continue:
+            # User cancelled - clean up and exit
+            print("\n" + "=" * 50)
+            print("CANCELLED - Cleaning up")
+            print("=" * 50)
+
+            if review_file.exists():
+                review_file.unlink()
+                print(f"✓ Deleted review file: {review_file}")
+
+            print(f"\nNo images generated for {target_date}. State not updated.")
+            return False
+
+        # User pressed Enter - continue with generation
+        print("\n" + "=" * 50)
+        print("GENERATING IMAGES")
+        print("=" * 50)
+
+        # Parse the (possibly edited) review file
+        print("\nReading edited content from review file...")
+        edited_content = parse_review_file(review_file)
 
     # Generate Ayah image with edited content
     print()
@@ -379,15 +402,16 @@ def generate_for_date(
         else:
             print(f"✓ Hadith page {page_num} saved: {hadith_output_path}")
 
-    # Delete review file
-    print()
-    print("=" * 50)
-    print("CLEANING UP")
-    print("=" * 50)
+    # Delete review file (if it was created)
+    if review_file:
+        print()
+        print("=" * 50)
+        print("CLEANING UP")
+        print("=" * 50)
 
-    if review_file.exists():
-        review_file.unlink()
-        print(f"✓ Deleted review file: {review_file}")
+        if review_file.exists():
+            review_file.unlink()
+            print(f"✓ Deleted review file: {review_file}")
 
     # Update state with both (use end_ayah so next generation continues from correct position)
     # Pass target_date so state reflects the date we generated for
@@ -426,6 +450,11 @@ Examples:
         default=1,
         metavar='N',
         help='Number of days to generate (default: 1 for today only)'
+    )
+    parser.add_argument(
+        '--skip-review',
+        action='store_true',
+        help='Skip content review step and generate images directly'
     )
     args = parser.parse_args()
 
@@ -505,7 +534,8 @@ Examples:
                 hadith_provider=hadith_provider,
                 output_dir=output_dir,
                 day_num=day_num,
-                total_days=num_days
+                total_days=num_days,
+                skip_review=args.skip_review
             )
 
             if success:
