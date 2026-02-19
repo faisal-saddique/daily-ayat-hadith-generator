@@ -24,6 +24,23 @@ class HadithTranslation(BaseModel):
     )
 
 
+class FixedTexts(BaseModel):
+    """Structured output for batched punctuation correction across all translations."""
+    ayah_urdu: str = Field(
+        description="Fixed Urdu translation of the Quran verse with proper Urdu punctuation marks"
+    )
+    ayah_english: str = Field(
+        description="Fixed English translation of the Quran verse with proper punctuation and Arabic diacritics"
+    )
+    hadith_urdu: str = Field(
+        description="Fixed Urdu translation of the Hadith with proper Urdu punctuation marks"
+    )
+    hadith_english: Optional[str] = Field(
+        default=None,
+        description="Fixed English translation of the Hadith, or null if not provided"
+    )
+
+
 class TranslationGenerator:
     """AI-powered translation generator using Pydantic AI with automatic API key rotation."""
 
@@ -260,3 +277,85 @@ This translation will be shared publicly, so it MUST be accurate and authentic."
         """
         result = self.generate_translation(arabic_text, urdu_translation, hadith_number)
         return result.english_translation
+
+    def fix_all_punctuation(
+        self,
+        ayah_urdu: str,
+        ayah_english: str,
+        hadith_urdu: str,
+        hadith_english: Optional[str] = None
+    ) -> FixedTexts:
+        """
+        Fix punctuation and diacritics for all translations in a single API call.
+
+        Urdu texts: Replaces Latin punctuation with proper Urdu marks (۔ ، ؟).
+        English texts: Fixes punctuation and adds Arabic transliteration diacritics (macrons).
+
+        Args:
+            ayah_urdu: Urdu translation of the Quran verse
+            ayah_english: English translation of the Quran verse
+            hadith_urdu: Urdu translation of the Hadith
+            hadith_english: English translation of the Hadith, or None to skip
+
+        Returns:
+            FixedTexts with corrected translations. On failure, returns originals unchanged.
+        """
+        instructions = """You are an expert Islamic scholar and editor fluent in both Urdu and English.
+Fix punctuation and diacritics in the provided Islamic translations.
+
+FOR URDU TEXTS:
+1. Use proper Urdu/Arabic punctuation marks only:
+   - ۔ for full stop (never Latin .)
+   - ، for comma (never Latin ,)
+   - ؟ for question mark (never Latin ?)
+2. Fix spacing around punctuation marks
+3. Do NOT change any wording or meaning
+
+FOR ENGLISH TEXTS:
+1. Fix any punctuation mistakes (missing commas, periods, misplaced punctuation, etc.)
+2. Add proper Arabic transliteration diacritics where Arabic names/terms appear:
+   - Long vowels: ā (alif), ī (ya), ū (waw)
+   - Examples: Abū, Muḥammad, Ḥadīth, Salāh, Zakāh, Ṣaḥābah, ʿĀʾishah, Dāwūd
+   - Use ʿ for ʿayn (ع) and ʾ for hamzah (ء) where appropriate
+3. Do NOT change any wording or meaning
+
+Return each corrected text in its corresponding output field."""
+
+        prompt_parts = [
+            "Fix the punctuation and diacritics in these Islamic translations:\n",
+            f"--- AYAH (Quran verse) - Urdu ---\n{ayah_urdu}\n",
+            f"--- AYAH (Quran verse) - English ---\n{ayah_english}\n",
+            f"--- HADITH - Urdu ---\n{hadith_urdu}\n",
+        ]
+        if hadith_english:
+            prompt_parts.append(f"--- HADITH - English ---\n{hadith_english}\n")
+        else:
+            prompt_parts.append("No Hadith English translation provided — set hadith_english to null.")
+
+        prompt = "\n".join(prompt_parts)
+
+        logger.info("Fixing punctuation for all translations in a single call")
+
+        env_var = "GEMINI_API_KEY" if self.model.startswith("gemini") else "OPENAI_API_KEY"
+        api_key = self._get_current_api_key()
+        old_key = os.environ.get(env_var)
+        os.environ[env_var] = api_key
+
+        try:
+            agent = Agent(self.model, output_type=FixedTexts, instructions=instructions)
+            result = agent.run_sync(prompt)
+            logger.info("Punctuation fixed for all translations")
+            return result.output
+        except Exception as e:
+            logger.warning(f"Punctuation fixing failed, using originals: {e}")
+            return FixedTexts(
+                ayah_urdu=ayah_urdu,
+                ayah_english=ayah_english,
+                hadith_urdu=hadith_urdu,
+                hadith_english=hadith_english
+            )
+        finally:
+            if old_key is not None:
+                os.environ[env_var] = old_key
+            elif env_var in os.environ:
+                del os.environ[env_var]

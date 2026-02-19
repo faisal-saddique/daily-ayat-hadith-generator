@@ -161,6 +161,7 @@ class HadithProvider:
         Note: AI translation is only generated for non-weak hadiths to preserve tokens.
         """
         english_translation = ""
+        english_from_ai = False
 
         # Try to get English from local database first
         if self.db:
@@ -198,6 +199,7 @@ class HadithProvider:
                         urdu_translation=scraped.urdu_translation,
                         hadith_number=scraped.hadith_number
                     )
+                    english_from_ai = True
                     logger.info(f"AI translation generated successfully for hadith {scraped.hadith_number}")
                 except Exception as e:
                     logger.warning(f"AI translation failed for hadith {scraped.hadith_number}: {e}")
@@ -208,7 +210,8 @@ class HadithProvider:
             urdu_translation=scraped.urdu_translation,
             english_translation=english_translation,
             grade=scraped.grade,
-            graded_by=scraped.graded_by
+            graded_by=scraped.graded_by,
+            english_from_ai=english_from_ai
         )
 
     def get_hadith(self, hadith_number: int) -> Hadith:

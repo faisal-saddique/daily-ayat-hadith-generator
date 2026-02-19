@@ -5,12 +5,14 @@ import logging
 import argparse
 from pathlib import Path
 from datetime import datetime, timedelta, date
+from typing import Optional
 import json
 
 from .database import IslamicDatabase
 from .state import StateManager
 from .image_generator import IslamicImageGenerator
 from .hadith_provider import HadithProvider, HadithProviderConfig
+from .translation_generator import TranslationGenerator
 
 # Setup logging
 logging.basicConfig(
@@ -205,7 +207,8 @@ def generate_for_date(
     output_dir: Path,
     day_num: int = 1,
     total_days: int = 1,
-    skip_review: bool = False
+    skip_review: bool = False,
+    translation_generator: Optional[TranslationGenerator] = None
 ) -> bool:
     """
     Generate Ayah and Hadith images for a specific date.
@@ -270,6 +273,37 @@ def generate_for_date(
         print(f"Grading: {hadith.grade} {hadith.graded_by}")
     print(f"Arabic: {hadith.arabic_text[:50]}...")
     print(f"Urdu: {hadith.urdu_translation[:50]}...")
+
+    # Fix punctuation via AI if available (single batched call)
+    if translation_generator:
+        print()
+        print("=" * 50)
+        print("FIXING PUNCTUATION")
+        print("=" * 50)
+        print()
+
+        # Include hadith English only if it came from scraping (not AI-generated).
+        # AI-generated translations already have correct punctuation and diacritics.
+        hadith_english_to_fix = (
+            hadith.english_translation
+            if hadith.english_translation and not hadith.english_from_ai
+            else None
+        )
+
+        fixed = translation_generator.fix_all_punctuation(
+            ayah_urdu=ayah.urdu_translation,
+            ayah_english=ayah.english_translation,
+            hadith_urdu=hadith.urdu_translation,
+            hadith_english=hadith_english_to_fix
+        )
+
+        ayah.urdu_translation = fixed.ayah_urdu
+        ayah.english_translation = fixed.ayah_english
+        hadith.urdu_translation = fixed.hadith_urdu
+        if fixed.hadith_english is not None:
+            hadith.english_translation = fixed.hadith_english
+
+        print("✓ All translations punctuation fixed")
 
     # Create review file or use content directly
     review_file = None
@@ -500,6 +534,9 @@ Examples:
     hadith_config = HadithProviderConfig.from_config_file(config_file)
     hadith_provider = HadithProvider(hadith_config, db=db)
 
+    # Reuse the translation generator from hadith provider (if AI is configured)
+    translation_generator = hadith_provider.translation_generator
+
     # Display hadith source info
     source_info = hadith_provider.get_source_info()
     print(f"Hadith Source: {source_info['mode'].upper()}")
@@ -535,7 +572,8 @@ Examples:
                 output_dir=output_dir,
                 day_num=day_num,
                 total_days=num_days,
-                skip_review=args.skip_review
+                skip_review=args.skip_review,
+                translation_generator=translation_generator
             )
 
             if success:
