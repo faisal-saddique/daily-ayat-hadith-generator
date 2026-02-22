@@ -138,6 +138,15 @@ class IslamicImageGenerator:
             # Pattern 3: No English equivalent nearby, just replace the symbol
             text = text.replace(arabic, english)
 
+        # Final pass: strip any remaining Arabic Unicode characters that weren't caught above.
+        # Arabic chars have no place in English text and would render as boxes with Latin fonts.
+        # Ranges: Arabic (0600-06FF), Supplement (0750-077F), Extended-A (08A0-08FF),
+        #         Presentation Forms-A (FB50-FDFF), Presentation Forms-B (FE70-FEFF)
+        text = re.sub(r'[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]+', '', text)
+        # Clean up empty parentheses and extra whitespace left behind
+        text = re.sub(r'\(\s*\)', '', text)
+        text = re.sub(r'\s{2,}', ' ', text).strip()
+
         return text
 
     def _wrap_text(self, text: str, font: ImageFont.FreeTypeFont, max_width: int) -> list[str]:
