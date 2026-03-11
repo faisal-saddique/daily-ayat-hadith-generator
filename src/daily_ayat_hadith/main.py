@@ -8,11 +8,15 @@ from datetime import datetime, timedelta, date
 from typing import Optional
 import json
 
+from dotenv import load_dotenv
+load_dotenv()
+
 from .database import IslamicDatabase
 from .state import StateManager
 from .image_generator import IslamicImageGenerator
 from .hadith_provider import HadithProvider, HadithProviderConfig
 from .translation_generator import TranslationGenerator
+from .tts_generator import TTSGenerator, TTSConfig
 
 # Setup logging
 logging.basicConfig(
@@ -208,7 +212,8 @@ def generate_for_date(
     day_num: int = 1,
     total_days: int = 1,
     skip_review: bool = False,
-    translation_generator: Optional[TranslationGenerator] = None
+    translation_generator: Optional[TranslationGenerator] = None,
+    tts_generator: Optional[TTSGenerator] = None
 ) -> bool:
     """
     Generate Ayah and Hadith images for a specific date.
@@ -436,6 +441,53 @@ def generate_for_date(
         else:
             print(f"✓ Hadith page {page_num} saved: {hadith_output_path}")
 
+    # Generate TTS audio (if enabled)
+    if tts_generator and tts_generator.config.enabled:
+        print()
+        print("=" * 50)
+        print("GENERATING TTS AUDIO")
+        print("=" * 50)
+        print()
+
+        ayah_base = f"ayat_{ayah.surah_name.replace(' ', '_')}_{ayah_ref_for_filename}"
+        hadith_base = f"hadith_mishkaat_{hadith.hadith_number}"
+
+        tts_results = []
+
+        path = tts_generator.generate_ayah_english(
+            edited_content['ayah']['english'],
+            date_output_dir / f"{ayah_base}_english.mp3"
+        )
+        if path:
+            tts_results.append(f"✓ Ayah English audio: {path.name}")
+
+        path = tts_generator.generate_ayah_urdu(
+            edited_content['ayah']['urdu'],
+            date_output_dir / f"{ayah_base}_urdu.mp3"
+        )
+        if path:
+            tts_results.append(f"✓ Ayah Urdu audio: {path.name}")
+
+        path = tts_generator.generate_hadith_english(
+            edited_content['hadith']['english'],
+            date_output_dir / f"{hadith_base}_english.mp3"
+        )
+        if path:
+            tts_results.append(f"✓ Hadith English audio: {path.name}")
+
+        path = tts_generator.generate_hadith_urdu(
+            edited_content['hadith']['urdu'],
+            date_output_dir / f"{hadith_base}_urdu.mp3"
+        )
+        if path:
+            tts_results.append(f"✓ Hadith Urdu audio: {path.name}")
+
+        if tts_results:
+            for r in tts_results:
+                print(r)
+        else:
+            print("No TTS audio generated (check config.tts.generate settings)")
+
     # Delete review file (if it was created)
     if review_file:
         print()
@@ -537,6 +589,23 @@ Examples:
     # Reuse the translation generator from hadith provider (if AI is configured)
     translation_generator = hadith_provider.translation_generator
 
+    # Initialize TTS generator
+    tts_config = TTSConfig.from_config_file(config_file)
+    tts_generator = TTSGenerator(tts_config) if tts_config.enabled else None
+    if tts_generator:
+        print(f"TTS: Enabled (model: {tts_config.model})")
+        enabled_tracks = [
+            k for k, v in {
+                "ayah_english": tts_config.ayah_english,
+                "ayah_urdu": tts_config.ayah_urdu,
+                "hadith_english": tts_config.hadith_english,
+                "hadith_urdu": tts_config.hadith_urdu,
+            }.items() if v
+        ]
+        print(f"  Generating: {', '.join(enabled_tracks) if enabled_tracks else 'none'}")
+    else:
+        print("TTS: Disabled")
+
     # Display hadith source info
     source_info = hadith_provider.get_source_info()
     print(f"Hadith Source: {source_info['mode'].upper()}")
@@ -573,7 +642,8 @@ Examples:
                 day_num=day_num,
                 total_days=num_days,
                 skip_review=args.skip_review,
-                translation_generator=translation_generator
+                translation_generator=translation_generator,
+                tts_generator=tts_generator
             )
 
             if success:
