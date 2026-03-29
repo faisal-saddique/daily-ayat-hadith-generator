@@ -593,7 +593,8 @@ Examples:
     tts_config = TTSConfig.from_config_file(config_file)
     tts_generator = TTSGenerator(tts_config) if tts_config.enabled else None
     if tts_generator:
-        print(f"TTS: Enabled (model: {tts_config.model})")
+        model_name = tts_config.gemini_model if tts_config.provider == "gemini" else tts_config.el_model
+        print(f"TTS: Enabled (provider: {tts_config.provider}, model: {model_name})")
         enabled_tracks = [
             k for k, v in {
                 "ayah_english": tts_config.ayah_english,

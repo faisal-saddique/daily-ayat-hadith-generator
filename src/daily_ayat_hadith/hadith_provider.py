@@ -262,7 +262,26 @@ class HadithProvider:
         # Use local database
         if self.db:
             logger.info(f"Fetching hadith {hadith_number} from local database")
-            return self.db.get_hadith(hadith_number)
+            hadith = self.db.get_hadith(hadith_number)
+
+            # Generate AI English translation if missing and AI is enabled
+            if not hadith.english_translation and self.translation_generator:
+                if self._is_weak_hadith(hadith):
+                    logger.info(f"Skipping AI translation for weak hadith {hadith_number}: {hadith.grade}")
+                else:
+                    try:
+                        logger.info(f"Generating AI English translation for hadith {hadith_number} (local DB fallback)")
+                        hadith.english_translation = self.translation_generator.get_english_translation(
+                            arabic_text=hadith.arabic_text,
+                            urdu_translation=hadith.urdu_translation,
+                            hadith_number=hadith_number
+                        )
+                        hadith.english_from_ai = True
+                        logger.info(f"AI translation generated successfully for hadith {hadith_number}")
+                    except Exception as e:
+                        logger.warning(f"AI translation failed for hadith {hadith_number}: {e}")
+
+            return hadith
 
         raise ValueError(f"No hadith source available to fetch hadith {hadith_number}")
 

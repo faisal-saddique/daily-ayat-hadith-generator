@@ -79,7 +79,7 @@ class IslamicDatabase:
 
     # Ayah combining configuration
     # Short ayahs are combined to ensure visually appealing images
-    MIN_CONTENT_LENGTH = 350  # Minimum combined character length before combining
+    MIN_CONTENT_LENGTH = 600  # Minimum combined character length before combining
     MAX_CONTENT_LENGTH = 2000  # Don't combine if result would exceed this
     MAX_AYAHS_TO_COMBINE = 3  # Maximum number of consecutive ayahs to combine
 

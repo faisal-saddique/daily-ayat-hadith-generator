@@ -66,30 +66,43 @@
   },
   "tts": {
     "enabled": true,
-    "english_voice_id": "JBFqnCBsd6RMkjVDRZzb",
-    "urdu_voice_id": "JBFqnCBsd6RMkjVDRZzb",
-    "model": "eleven_multilingual_v2",
-    "output_format": "mp3_44100_128",
-    "voice_settings": {
-      "stability": 0.85,
-      "similarity_boost": 0.75,
-      "style": 0.0,
-      "use_speaker_boost": true,
-      "speed": 0.85
-    },
+    "provider": "gemini",
     "generate": {
       "ayah_english": true,
       "ayah_urdu": false,
       "hadith_english": true,
       "hadith_urdu": false
     },
-    "available_male_voices": {
-      "george": "JBFqnCBsd6RMkjVDRZzb",
-      "charlie": "IKne3meq5aSn9XLyUdCD",
-      "callum": "N2lVS1w4EtoT3dr4eOWO",
-      "liam": "TX3LPaxmHKxFdv7VOQHJ",
-      "roger": "CwhRBWXzGAHq8TQ4Fs17",
-      "harry": "SOYHLrjzK2X1ezoPC6cr"
+    "elevenlabs": {
+      "english_voice_id": "JBFqnCBsd6RMkjVDRZzb",
+      "urdu_voice_id": "JBFqnCBsd6RMkjVDRZzb",
+      "model": "eleven_multilingual_v2",
+      "output_format": "mp3_44100_128",
+      "voice_settings": {
+        "stability": 0.85,
+        "similarity_boost": 0.75,
+        "style": 0.0,
+        "use_speaker_boost": true,
+        "speed": 0.85
+      },
+      "available_male_voices": {
+        "george": "JBFqnCBsd6RMkjVDRZzb",
+        "charlie": "IKne3meq5aSn9XLyUdCD",
+        "callum": "N2lVS1w4EtoT3dr4eOWO",
+        "liam": "TX3LPaxmHKxFdv7VOQHJ",
+        "roger": "CwhRBWXzGAHq8TQ4Fs17",
+        "harry": "SOYHLrjzK2X1ezoPC6cr"
+      }
+    },
+    "gemini": {
+      "model": "gemini-2.5-flash-preview-tts",
+      "english_voice": "Sadaltager",
+      "urdu_voice": "Sadaltager",
+      "style_instruction": "Speak in a calm, measured, scholarly tone befitting Islamic religious texts. When you encounter Arabic names and terms such as Allah, Shaytan, Abu, Ibn, salah, hadith, or any transliterated Arabic words, pronounce them slowly and clearly with deliberate emphasis. Pause briefly after Quranic verses or prophetic sayings to allow the words to resonate.",
+      "available_voices": [
+        "Aoede", "Charon", "Fenrir", "Kore", "Puck",
+        "Zephyr", "Leda", "Orus", "Enceladus", "Iapetus"
+      ]
     }
   }
 }
