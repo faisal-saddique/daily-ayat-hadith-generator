@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, date
 from typing import Optional
 import json
 
+import os
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -17,6 +18,7 @@ from .image_generator import IslamicImageGenerator
 from .hadith_provider import HadithProvider, HadithProviderConfig
 from .translation_generator import TranslationGenerator
 from .tts_generator import TTSGenerator, TTSConfig
+from .quran_api import QuranAPI
 
 # Setup logging
 logging.basicConfig(
@@ -564,6 +566,7 @@ Examples:
     arabic_font = 'pdms'  # default
     urdu_translation = 'Maududi'  # default
     english_translation = 'MaududiEn'  # default
+    config: dict = {}
 
     if config_file.exists():
         with open(config_file, 'r', encoding='utf-8') as f:
@@ -572,12 +575,37 @@ Examples:
             urdu_translation = config.get('translations', {}).get('urdu', 'Maududi')
             english_translation = config.get('translations', {}).get('english', 'MaududiEn')
 
+    # Initialize Quran.com API client if configured
+    quran_api = None
+    quran_api_config = config.get('quran_api', {}) if config_file.exists() else {}
+    if quran_api_config.get('enabled', False):
+        client_id = os.environ.get('QURAN_API_CLIENT_ID') or quran_api_config.get('client_id', '')
+        client_secret = os.environ.get('QURAN_API_CLIENT_SECRET') or quran_api_config.get('client_secret', '')
+        if client_id and client_secret:
+            quran_api = QuranAPI(
+                client_id=client_id,
+                client_secret=client_secret,
+                urdu_translation=urdu_translation,
+                english_translation=english_translation,
+                arabic_font=arabic_font,
+            )
+            if quran_api.has_translation_ids():
+                print(f"Quran Source: Quran.com API (primary) + Local DB (fallback)")
+            else:
+                print(f"Quran Source: Local DB (configured translators not available in API)")
+                quran_api = None
+        else:
+            print("Quran Source: Local DB (API credentials not set)")
+    else:
+        print("Quran Source: Local DB")
+
     # Initialize components
     db = IslamicDatabase(
         db_path,
         arabic_font=arabic_font,
         urdu_translation=urdu_translation,
-        english_translation=english_translation
+        english_translation=english_translation,
+        quran_api=quran_api,
     )
     state_manager = StateManager(state_file)
     image_gen = IslamicImageGenerator(fonts_dir)

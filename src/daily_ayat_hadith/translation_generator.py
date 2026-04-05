@@ -303,6 +303,8 @@ This translation will be shared publicly, so it MUST be accurate and authentic."
         instructions = """You are an expert Islamic scholar and editor fluent in both Urdu and English.
 Fix punctuation and diacritics in the provided Islamic translations.
 
+CRITICAL: You MUST return the COMPLETE text for each field. Do NOT truncate, summarize, or shorten any text. Every word of the input must appear in the output.
+
 FOR URDU TEXTS:
 1. Use proper Urdu/Arabic punctuation marks only:
    - ۔ for full stop (never Latin .)
@@ -310,6 +312,7 @@ FOR URDU TEXTS:
    - ؟ for question mark (never Latin ?)
 2. Fix spacing around punctuation marks
 3. Do NOT change any wording or meaning
+4. Return the FULL text - do not cut it short even if it seems long
 
 FOR ENGLISH TEXTS:
 1. Fix any punctuation mistakes (missing commas, periods, misplaced punctuation, etc.)
@@ -318,8 +321,9 @@ FOR ENGLISH TEXTS:
    - Examples: Abū, Muḥammad, Ḥadīth, Salāh, Zakāh, Ṣaḥābah, ʿĀʾishah, Dāwūd
    - Use ʿ for ʿayn (ع) and ʾ for hamzah (ء) where appropriate
 3. Do NOT change any wording or meaning
+4. Return the FULL text - do not cut it short even if it seems long
 
-Return each corrected text in its corresponding output field."""
+Return each corrected text in its corresponding output field. The output length should be similar to the input length."""
 
         prompt_parts = [
             "Fix the punctuation and diacritics in these Islamic translations:\n",
@@ -341,11 +345,30 @@ Return each corrected text in its corresponding output field."""
         old_key = os.environ.get(env_var)
         os.environ[env_var] = api_key
 
+        def _guard(original: str, fixed: str, field: str) -> str:
+            """Return fixed text only if it's not significantly shorter than original."""
+            if not original:
+                return fixed or original
+            ratio = len(fixed) / len(original) if fixed else 0
+            if ratio < 0.85:
+                logger.warning(
+                    f"Punctuation fixer truncated {field} "
+                    f"({len(original)} -> {len(fixed)} chars, {ratio:.0%}). Using original."
+                )
+                return original
+            return fixed
+
         try:
             agent = Agent(self.model, output_type=FixedTexts, instructions=instructions)
             result = agent.run_sync(prompt)
+            fixed = result.output
             logger.info("Punctuation fixed for all translations")
-            return result.output
+            return FixedTexts(
+                ayah_urdu=_guard(ayah_urdu, fixed.ayah_urdu, "ayah_urdu"),
+                ayah_english=_guard(ayah_english, fixed.ayah_english, "ayah_english"),
+                hadith_urdu=_guard(hadith_urdu, fixed.hadith_urdu, "hadith_urdu"),
+                hadith_english=_guard(hadith_english or "", fixed.hadith_english or "", "hadith_english") or None,
+            )
         except Exception as e:
             logger.warning(f"Punctuation fixing failed, using originals: {e}")
             return FixedTexts(

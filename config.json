@@ -1,5 +1,10 @@
 {
   "hijri_offset_days": -1,
+  "quran_api": {
+    "enabled": true,
+    "fallback_to_local": true,
+    "comment": "Credentials loaded from .env (QURAN_API_CLIENT_ID / QURAN_API_CLIENT_SECRET)"
+  },
   "translations": {
     "urdu": "Maududi",
     "english": "MaududiEn",

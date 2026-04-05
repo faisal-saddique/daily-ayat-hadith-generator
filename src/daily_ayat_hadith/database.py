@@ -2,9 +2,15 @@
 
 import re
 import sqlite3
+import logging
 from pathlib import Path
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .quran_api import QuranAPI
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -83,7 +89,7 @@ class IslamicDatabase:
     MAX_CONTENT_LENGTH = 2000  # Don't combine if result would exceed this
     MAX_AYAHS_TO_COMBINE = 3  # Maximum number of consecutive ayahs to combine
 
-    def __init__(self, db_path: Path, arabic_font: str = 'pdms', urdu_translation: str = 'Maududi', english_translation: str = 'MaududiEn'):
+    def __init__(self, db_path: Path, arabic_font: str = 'pdms', urdu_translation: str = 'Maududi', english_translation: str = 'MaududiEn', quran_api: 'Optional[QuranAPI]' = None):
         self.db_path = db_path
         self.conn = sqlite3.connect(db_path)
         self.conn.row_factory = sqlite3.Row
@@ -91,6 +97,7 @@ class IslamicDatabase:
         self.arabic_text_column = self.FONT_COLUMN_MAP.get(arabic_font, 'AyahTextPdms')
         self.urdu_translation = urdu_translation
         self.english_translation = english_translation
+        self.quran_api = quran_api
 
     def _clean_text(self, text: str) -> str:
         """Clean text by removing HTML entities and escape sequences."""
@@ -277,13 +284,18 @@ class IslamicDatabase:
 
         return self._combine_ayahs(combined)
 
+    def _get_surah_name(self, surah_number: int) -> str:
+        """Get surah English name from local DB."""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT NameEnglish FROM surah WHERE SurahNumber = ?", (surah_number,))
+        row = cursor.fetchone()
+        return row['NameEnglish'] if row else f"Surah {surah_number}"
+
     def get_next_ayah(self, current_surah: int, current_ayah: int) -> CombinedAyah:
         """
         Get the next ayah(s) in sequence, combining short ayahs together.
 
-        If the next ayah is short (combined text < MIN_CONTENT_LENGTH chars),
-        it will be combined with subsequent consecutive ayahs from the same surah
-        until the minimum length is reached or MAX_AYAHS_TO_COMBINE is hit.
+        Tries the Quran.com API first (if configured), falls back to local DB.
 
         Args:
             current_surah: Current surah number
@@ -320,9 +332,22 @@ class IslamicDatabase:
 
             if not next_row:
                 # End of Quran, wrap around to beginning
-                return self._get_combined_ayahs(1, 1)
+                return self._try_api_or_db(1, 1)
 
-        return self._get_combined_ayahs(next_row['SurahNumber'], next_row['AyahNumber'])
+        return self._try_api_or_db(next_row['SurahNumber'], next_row['AyahNumber'])
+
+    def _try_api_or_db(self, surah_number: int, ayah_number: int) -> CombinedAyah:
+        """Try QuranAPI first, fall back to local DB."""
+        if self.quran_api is not None:
+            try:
+                surah_name = self._get_surah_name(surah_number)
+                result = self.quran_api.get_combined_ayahs(surah_number, ayah_number, surah_name=surah_name)
+                logger.info(f"Fetched {result.reference} from Quran.com API")
+                return result
+            except Exception as e:
+                logger.warning(f"Quran.com API failed, falling back to local DB: {e}")
+
+        return self._get_combined_ayahs(surah_number, ayah_number)
 
     def get_hadith(self, hadith_number: int) -> Hadith:
         """Get a specific hadith from Mishkaat."""
