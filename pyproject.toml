@@ -25,6 +25,8 @@ dependencies = [
     "pydantic-ai>=0.0.14",
     "python-dotenv>=1.0.0",
     "elevenlabs>=2.38.1",
+    "fonttools>=4.62.1",
+    "brotli>=1.2.0",
 ]
 
 [project.urls]

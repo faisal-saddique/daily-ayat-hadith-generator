@@ -204,6 +204,105 @@ def wait_for_user_input() -> bool:
         return False
 
 
+WHATSAPP_CHAR_LIMIT = 700
+CAPTION_DIVIDER = "─────────────────────────"
+
+
+def enforce_whatsapp_limit(caption: str, limit: int = WHATSAPP_CHAR_LIMIT) -> str:
+    """Hard-trim the full caption to the WhatsApp status character limit (last-resort fallback)."""
+    return caption.strip()[:limit]
+
+
+def save_content_json(date_output_dir: Path, edited_content: dict, ayah, hadith) -> Path:
+    """Persist the day's final content to JSON for later caption generation."""
+    content_data = {
+        "date": str(date_output_dir.name),
+        "ayah": {
+            "reference": ayah.reference,
+            "surah_number": ayah.surah_number,
+            "surah_name": ayah.surah_name,
+            "start_ayah": ayah.start_ayah,
+            "end_ayah": ayah.end_ayah,
+            "arabic": edited_content['ayah']['arabic'],
+            "urdu": edited_content['ayah']['urdu'],
+            "english": edited_content['ayah']['english'],
+        },
+        "hadith": {
+            "reference": f"Mishkaat {hadith.hadith_number}",
+            "number": hadith.hadith_number,
+            "grade": hadith.grade or "",
+            "graded_by": hadith.graded_by or "",
+            "arabic": edited_content['hadith']['arabic'],
+            "urdu": edited_content['hadith']['urdu'],
+            "english": edited_content['hadith']['english'],
+        }
+    }
+    json_file = date_output_dir / "content.json"
+    with open(json_file, 'w', encoding='utf-8') as f:
+        json.dump(content_data, f, ensure_ascii=False, indent=2)
+    return json_file
+
+
+def generate_captions_for_date(
+    target_date: date,
+    output_dir: Path,
+    translation_generator,
+    lang: str = 'both'
+) -> None:
+    """Generate and save WhatsApp captions from a date's content.json."""
+    date_output_dir = output_dir / str(target_date)
+    json_file = date_output_dir / "content.json"
+
+    if not date_output_dir.exists() or not json_file.exists():
+        print(f"Error: No content found for {target_date}.")
+        print(f"Expected: {json_file}")
+        print("Run the generator first for this date to create content.json.")
+        sys.exit(1)
+
+    with open(json_file, 'r', encoding='utf-8') as f:
+        content = json.load(f)
+
+    print(f"\nGenerating WhatsApp captions for {target_date} (language: {lang})...")
+    print()
+
+    captions = translation_generator.generate_whatsapp_captions(
+        ayah_arabic=content['ayah']['arabic'],
+        ayah_urdu=content['ayah']['urdu'],
+        ayah_english=content['ayah']['english'],
+        ayah_reference=content['ayah']['reference'],
+        hadith_arabic=content['hadith']['arabic'],
+        hadith_urdu=content['hadith']['urdu'],
+        hadith_english=content['hadith']['english'],
+        hadith_reference=content['hadith']['reference'],
+        hadith_grade=content['hadith'].get('grade') or None,
+    )
+
+    def extract_section(caption: str, section: str) -> str:
+        if CAPTION_DIVIDER in caption:
+            parts = caption.split(CAPTION_DIVIDER, 1)
+            return parts[0].strip() if section == 'urdu' else parts[1].strip()
+        return caption.strip()
+
+    def save_caption(text: str, filename: str) -> None:
+        path = date_output_dir / filename
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(enforce_whatsapp_limit(text))
+        print(f"✓ Saved: {path}")
+
+    if lang == 'both':
+        save_caption(captions.ayah_caption, "ayah_caption.txt")
+        save_caption(captions.hadith_caption, "hadith_caption.txt")
+    elif lang == 'urdu':
+        save_caption(extract_section(captions.ayah_caption, 'urdu'), "ayah_caption_urdu.txt")
+        save_caption(extract_section(captions.hadith_caption, 'urdu'), "hadith_caption_urdu.txt")
+    elif lang == 'english':
+        save_caption(extract_section(captions.ayah_caption, 'english'), "ayah_caption_english.txt")
+        save_caption(extract_section(captions.hadith_caption, 'english'), "hadith_caption_english.txt")
+
+    print()
+    print(f"✓ Captions generated for {target_date}")
+
+
 def generate_for_date(
     target_date: date,
     db: IslamicDatabase,
@@ -501,6 +600,11 @@ def generate_for_date(
             review_file.unlink()
             print(f"✓ Deleted review file: {review_file}")
 
+    # Save final content to JSON for later caption generation
+    content_json = save_content_json(date_output_dir, edited_content, ayah, hadith)
+    print(f"✓ Content saved: {content_json.name}")
+    print(f"  (Run with --captions to generate WhatsApp captions for this date)")
+
     # Update state with both (use end_ayah so next generation continues from correct position)
     # Pass target_date so state reflects the date we generated for
     state_manager.update_after_generation(
@@ -527,9 +631,13 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  %(prog)s              Generate for today only
-  %(prog)s --days 3     Generate for today and next 2 days
-  %(prog)s -d 7         Generate for a week (today + 6 days)
+  %(prog)s                          Generate for today only
+  %(prog)s --days 3                 Generate for today and next 2 days
+  %(prog)s -d 7                     Generate for a week (today + 6 days)
+  %(prog)s --captions               Generate WhatsApp captions for today
+  %(prog)s --captions --date 2026-04-15             Captions for a specific date
+  %(prog)s --captions --lang urdu                   Urdu captions only
+  %(prog)s --captions --date 2026-04-15 --lang english   English captions for a date
 """
     )
     parser.add_argument(
@@ -544,12 +652,23 @@ Examples:
         action='store_true',
         help='Skip content review step and generate images directly'
     )
+    parser.add_argument(
+        '--captions',
+        action='store_true',
+        help='Generate WhatsApp captions from existing content.json (no image generation)'
+    )
+    parser.add_argument(
+        '--date',
+        metavar='YYYY-MM-DD',
+        help='Date to use with --captions (default: today)'
+    )
+    parser.add_argument(
+        '--lang',
+        choices=['both', 'urdu', 'english'],
+        default='both',
+        help='Language(s) for captions: both (default), urdu, or english'
+    )
     args = parser.parse_args()
-
-    num_days = args.days
-    if num_days < 1:
-        print("Error: Number of days must be at least 1")
-        sys.exit(1)
 
     # Setup paths
     project_root = Path(__file__).parent.parent.parent
@@ -561,6 +680,40 @@ Examples:
 
     # Ensure output directory exists
     output_dir.mkdir(exist_ok=True)
+
+    # --captions mode: minimal init, generate captions, done
+    if args.captions:
+        config: dict = {}
+        if config_file.exists():
+            with open(config_file, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+
+        ai_cfg = config.get('hadith_source', {}).get('ai_translation', {})
+        model = ai_cfg.get('model', 'gemini-2.5-flash')
+
+        try:
+            caption_gen = TranslationGenerator(model=model)
+        except ValueError as e:
+            print(f"Error: Cannot generate captions — {e}")
+            sys.exit(1)
+
+        if args.date:
+            try:
+                target_date = datetime.strptime(args.date, '%Y-%m-%d').date()
+            except ValueError:
+                print(f"Error: Invalid date '{args.date}'. Use YYYY-MM-DD format.")
+                sys.exit(1)
+        else:
+            target_date = datetime.now().date()
+
+        generate_captions_for_date(target_date, output_dir, caption_gen, args.lang)
+        return
+
+    # Image generation mode
+    num_days = args.days
+    if num_days < 1:
+        print("Error: Number of days must be at least 1")
+        sys.exit(1)
 
     # Load configuration
     arabic_font = 'pdms'  # default

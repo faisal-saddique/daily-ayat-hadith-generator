@@ -4,7 +4,9 @@ import logging
 import os
 from typing import Optional
 from pydantic import BaseModel, Field
-from pydantic_ai import Agent
+from pydantic_ai import Agent, Tool
+from pydantic_ai.models.openrouter import OpenRouterModel
+from pydantic_ai.providers.openrouter import OpenRouterProvider
 from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
@@ -41,6 +43,71 @@ class FixedTexts(BaseModel):
     )
 
 
+class WhatsAppCaptions(BaseModel):
+    """WhatsApp-formatted captions for ayah and hadith posts."""
+    ayah_caption: str = Field(
+        description=(
+            "Engaging WhatsApp caption for the Quran verse post. "
+            "Urdu section first, then a visual divider, then English. "
+            "Uses WhatsApp markdown: *bold*, _italic_, > quotes, - bullets."
+        )
+    )
+    hadith_caption: str = Field(
+        description=(
+            "Engaging WhatsApp caption for the Hadith post. "
+            "Urdu section first, then a visual divider, then English. "
+            "Uses WhatsApp markdown: *bold*, _italic_, > quotes, - bullets."
+        )
+    )
+
+
+def check_caption_lengths(ayah_caption: str, hadith_caption: str) -> str:
+    """
+    Verify that each full caption (Urdu + divider + English combined) is within
+    WhatsApp's 700-character status limit.
+
+    Each caption file is posted as a single WhatsApp status caption alongside its
+    image — the file contains BOTH Urdu and English together, so the TOTAL length
+    of the whole string must be under 700 characters.
+
+    Pass the complete caption string for each (including the divider line).
+    If either fails, shorten it and call this tool again. Only return final output
+    after receiving PASS.
+
+    Args:
+        ayah_caption: The full ayah caption string (Urdu + divider + English).
+        hadith_caption: The full hadith caption string (Urdu + divider + English).
+
+    Returns:
+        PASS with character counts, or FAIL listing which captions are over and by
+        exactly how many characters.
+    """
+    limit = 700
+    captions = {"Ayah caption": ayah_caption, "Hadith caption": hadith_caption}
+
+    failures = []
+    counts = {}
+    for name, text in captions.items():
+        count = len(text.strip())
+        counts[name] = count
+        if count > limit:
+            failures.append(f"{name}: {count} chars ({count - limit} over)")
+
+    if not failures:
+        summary = ", ".join(f"{name}={count}" for name, count in counts.items())
+        return (
+            f"PASS — both captions within limit. Counts: {summary}. "
+            f"You may now return the final WhatsAppCaptions output."
+        )
+
+    summary = "; ".join(failures)
+    return (
+        f"FAIL — {len(failures)} caption(s) over limit: {summary}. "
+        f"Shorten the over-limit caption(s) — trim reflection/context first, "
+        f"never cut the opening hook or closing dua — then call check_caption_lengths again."
+    )
+
+
 class TranslationGenerator:
     """AI-powered translation generator using Pydantic AI with automatic API key rotation."""
 
@@ -74,6 +141,12 @@ class TranslationGenerator:
 
         if len(self.api_keys) > 1:
             logger.info(f"Loaded {len(self.api_keys)} API keys for rotation")
+
+        # OpenRouter as final fallback (when all primary keys are exhausted)
+        self.openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
+        self.openrouter_models = ["google/gemini-2.0-flash-001", "anthropic/claude-sonnet-4-5"]
+        if self.openrouter_api_key:
+            logger.info(f"OpenRouter fallback available ({', '.join(self.openrouter_models)})")
 
         # Store instructions for reuse when creating agents
         self.instructions = """You are an expert Islamic scholar and translator specializing in hadith translation.
@@ -145,9 +218,23 @@ This translation will be shared publicly, so it MUST be accurate and authentic."
         return True
 
     def _is_rate_limit_error(self, error: Exception) -> bool:
-        """Check if the error is a rate limit error (429)."""
+        """Check if the error is retryable (rate limit 429 or service unavailable 503)."""
         error_str = str(error).lower()
-        return "429" in error_str or "rate limit" in error_str or "quota exceeded" in error_str
+        return (
+            "429" in error_str or
+            "rate limit" in error_str or
+            "quota exceeded" in error_str or
+            "503" in str(error) or
+            "unavailable" in error_str
+        )
+
+    def _create_openrouter_agent(self, output_type, model_name: str) -> Agent:
+        """Create an agent using OpenRouter as fallback provider."""
+        model = OpenRouterModel(
+            model_name,
+            provider=OpenRouterProvider(api_key=self.openrouter_api_key)
+        )
+        return Agent(model, output_type=output_type, instructions=self.instructions)
 
     def _create_agent_with_key(self, api_key: str) -> Agent:
         """Create a new agent instance with the specified API key."""
@@ -211,7 +298,7 @@ This translation will be shared publicly, so it MUST be accurate and authentic."
 
         # Try all API keys in sequence
         last_error = None
-        for attempt in range(len(self.api_keys)):
+        for _ in range(len(self.api_keys)):
             current_key = self._get_current_api_key()
 
             try:
@@ -247,16 +334,28 @@ This translation will be shared publicly, so it MUST be accurate and authentic."
                         logger.info(f"Retrying with next API key...")
                         continue
                     else:
-                        logger.error(f"All {len(self.api_keys)} API keys exhausted due to rate limits")
-                        raise Exception(f"All API keys exhausted: {str(e)}")
+                        logger.warning(f"All {len(self.api_keys)} Gemini keys exhausted, trying OpenRouter fallback")
+                        break
                 else:
                     # Not a rate limit error, don't retry
-                    logger.error(f"Failed to generate AI translation for {log_context}: {e}")
-                    raise Exception(f"AI translation failed: {str(e)}")
+                    logger.warning(f"Non-retryable error for {log_context}, trying OpenRouter fallback: {e}")
+                    break
 
-        # If we get here, all attempts failed
-        logger.error(f"Failed to generate AI translation for {log_context} after {len(self.api_keys)} attempts")
-        raise Exception(f"AI translation failed: {str(last_error)}")
+        # All primary keys failed — try OpenRouter models in sequence as final fallback
+        if self.openrouter_api_key:
+            for or_model in self.openrouter_models:
+                try:
+                    logger.info(f"Attempting OpenRouter fallback ({or_model}) for {log_context}")
+                    agent = self._create_openrouter_agent(HadithTranslation, or_model)
+                    result = agent.run_sync(prompt)
+                    translation = result.output
+                    logger.info(f"OpenRouter fallback succeeded ({or_model}) for {log_context} (confidence: {translation.confidence})")
+                    return translation
+                except Exception as e:
+                    last_error = e
+                    logger.warning(f"OpenRouter fallback failed ({or_model}) for {log_context}: {e}")
+
+        raise Exception(f"AI translation failed (all providers exhausted): {str(last_error)}")
 
     def get_english_translation(
         self,
@@ -315,8 +414,11 @@ FOR URDU TEXTS:
 4. Return the FULL text - do not cut it short even if it seems long
 
 FOR ENGLISH TEXTS:
-1. Fix any punctuation mistakes (missing commas, periods, misplaced punctuation, etc.)
-2. Add proper Arabic transliteration diacritics where Arabic names/terms appear:
+1. Fix broken words caused by line-break artifacts:
+   - Join words split by a hyphen (e.g., "Resur-rection" → "Resurrection", "nig-gardly" → "niggardly")
+   - Join words split by an errant space mid-word (e.g., "niggardli ness" → "niggardliness")
+2. Fix any punctuation mistakes (missing commas, periods, misplaced punctuation, etc.)
+3. Add proper Arabic transliteration diacritics where Arabic names/terms appear:
    - Long vowels: ā (alif), ī (ya), ū (waw)
    - Examples: Abū, Muḥammad, Ḥadīth, Salāh, Zakāh, Ṣaḥābah, ʿĀʾishah, Dāwūd
    - Use ʿ for ʿayn (ع) and ʾ for hamzah (ء) where appropriate
@@ -341,9 +443,6 @@ Return each corrected text in its corresponding output field. The output length 
         logger.info("Fixing punctuation for all translations in a single call")
 
         env_var = "GEMINI_API_KEY" if self.model.startswith("gemini") else "OPENAI_API_KEY"
-        api_key = self._get_current_api_key()
-        old_key = os.environ.get(env_var)
-        os.environ[env_var] = api_key
 
         def _guard(original: str, fixed: str, field: str) -> str:
             """Return fixed text only if it's not significantly shorter than original."""
@@ -358,27 +457,220 @@ Return each corrected text in its corresponding output field. The output length 
                 return original
             return fixed
 
-        try:
-            agent = Agent(self.model, output_type=FixedTexts, instructions=instructions)
-            result = agent.run_sync(prompt)
-            fixed = result.output
-            logger.info("Punctuation fixed for all translations")
-            return FixedTexts(
-                ayah_urdu=_guard(ayah_urdu, fixed.ayah_urdu, "ayah_urdu"),
-                ayah_english=_guard(ayah_english, fixed.ayah_english, "ayah_english"),
-                hadith_urdu=_guard(hadith_urdu, fixed.hadith_urdu, "hadith_urdu"),
-                hadith_english=_guard(hadith_english or "", fixed.hadith_english or "", "hadith_english") or None,
-            )
-        except Exception as e:
-            logger.warning(f"Punctuation fixing failed, using originals: {e}")
-            return FixedTexts(
-                ayah_urdu=ayah_urdu,
-                ayah_english=ayah_english,
-                hadith_urdu=hadith_urdu,
-                hadith_english=hadith_english
-            )
-        finally:
-            if old_key is not None:
-                os.environ[env_var] = old_key
-            elif env_var in os.environ:
-                del os.environ[env_var]
+        # Try all API keys in sequence (same rotation logic as generate_translation)
+        saved_index = self.current_key_index
+        self.current_key_index = 0
+        last_error = None
+
+        for _ in range(len(self.api_keys)):
+            api_key = self._get_current_api_key()
+            old_key = os.environ.get(env_var)
+            os.environ[env_var] = api_key
+            try:
+                agent = Agent(self.model, output_type=FixedTexts, instructions=instructions)
+                result = agent.run_sync(prompt)
+                fixed = result.output
+                logger.info("Punctuation fixed for all translations")
+                return FixedTexts(
+                    ayah_urdu=_guard(ayah_urdu, fixed.ayah_urdu, "ayah_urdu"),
+                    ayah_english=_guard(ayah_english, fixed.ayah_english, "ayah_english"),
+                    hadith_urdu=_guard(hadith_urdu, fixed.hadith_urdu, "hadith_urdu"),
+                    hadith_english=_guard(hadith_english or "", fixed.hadith_english or "", "hadith_english") or None,
+                )
+            except Exception as e:
+                last_error = e
+                if self._is_rate_limit_error(e):
+                    logger.warning(f"Punctuation fix: retryable error on key {self.current_key_index + 1}: {e}")
+                    if not self._rotate_api_key():
+                        break
+                else:
+                    break
+            finally:
+                if old_key is not None:
+                    os.environ[env_var] = old_key
+                elif env_var in os.environ:
+                    del os.environ[env_var]
+
+        self.current_key_index = saved_index
+
+        # All primary keys failed — try OpenRouter models in sequence as final fallback
+        if self.openrouter_api_key:
+            for or_model in self.openrouter_models:
+                try:
+                    logger.info(f"Attempting OpenRouter fallback for punctuation fixing ({or_model})")
+                    agent = self._create_openrouter_agent(FixedTexts, or_model)
+                    result = agent.run_sync(prompt)
+                    fixed = result.output
+                    logger.info(f"Punctuation fixed via OpenRouter fallback ({or_model})")
+                    return FixedTexts(
+                        ayah_urdu=_guard(ayah_urdu, fixed.ayah_urdu, "ayah_urdu"),
+                        ayah_english=_guard(ayah_english, fixed.ayah_english, "ayah_english"),
+                        hadith_urdu=_guard(hadith_urdu, fixed.hadith_urdu, "hadith_urdu"),
+                        hadith_english=_guard(hadith_english or "", fixed.hadith_english or "", "hadith_english") or None,
+                    )
+                except Exception as e:
+                    last_error = e
+                    logger.warning(f"OpenRouter fallback failed ({or_model}) for punctuation fixing: {e}")
+
+        logger.warning(f"Punctuation fixing failed on all providers, using originals: {last_error}")
+        return FixedTexts(
+            ayah_urdu=ayah_urdu,
+            ayah_english=ayah_english,
+            hadith_urdu=hadith_urdu,
+            hadith_english=hadith_english
+        )
+
+    def generate_whatsapp_captions(
+        self,
+        ayah_arabic: str,
+        ayah_urdu: str,
+        ayah_english: str,
+        ayah_reference: str,
+        hadith_arabic: str,
+        hadith_urdu: str,
+        hadith_english: str,
+        hadith_reference: str,
+        hadith_grade: Optional[str] = None,
+    ) -> WhatsAppCaptions:
+        """
+        Generate engaging WhatsApp captions for the ayah and hadith posts.
+
+        Each caption contains Urdu first, then English, with WhatsApp markdown formatting.
+        Includes context, key takeaways, practical action points, and a closing reflection.
+
+        Returns:
+            WhatsAppCaptions with ayah_caption and hadith_caption strings.
+            On failure, raises an exception.
+        """
+        instructions = """You are an Islamic scholar and community educator who crafts WhatsApp posts for Muslim communities. You write like a knowledgeable, warm friend — not a formal lecturer.
+
+TASK: Create two WhatsApp captions — one for a Quran verse post and one for a Hadith post.
+
+Each caption has TWO PARTS: Urdu first, then English, separated by this exact divider:
+
+─────────────────────────
+
+BUDGET REALITY — READ THIS FIRST:
+Total per caption file: under 700 chars (Urdu + divider + English combined).
+Safe target per language section: ~270 chars. That is tight. Every word must earn its place.
+Do not pad. Do not repeat across Urdu and English. Write like a poet, not a professor.
+
+WHATSAPP FORMATTING (literal characters that render in WhatsApp):
+- *text* → bold — use for the hook and the action label only
+- _text_ → italic — use for the closing dua/line only
+- > text → quote block — use for the core message (one line)
+- Keep line breaks minimal — every newline costs characters
+
+CAPTION STRUCTURE — 4 elements only, applied to EACH language section:
+
+1. *Hook* (~55 chars) — One line that stops the scroll. A question, a bold truth, or a relatable jab. No "Today's verse is..." Never generic.
+
+2. > Core quote (~70 chars) — The single most powerful phrase from the content. Not a summary — the actual words that hit hardest.
+
+3. Lesson (~90 chars) — One tight sentence connecting this wisdom to a real moment in someone's day. Specific beats general. No multi-sentence elaboration.
+
+4. _Action + Dua_ (~55 chars) — One concrete thing to do today fused with a short closing dua. One line. Make it linger.
+
+WHAT TO CUT when over budget (in order):
+- The lesson sentence (compress to a clause)
+- The hook (trim, don't cut entirely)
+- NEVER cut the quote or the closing dua
+
+TONE:
+- Warm, direct, like a knowledgeable older sibling — not a khutbah
+- If content is a warning, frame with compassion not fear
+- Ground in real life: WhatsApp group dramas, workplaces, family, scrolling at 2am
+
+LANGUAGE:
+- Urdu: conversational, not formal. Proper Urdu punctuation (۔ ، ؟). No scholarly register.
+- English: plain modern English. _Italic_ for Arabic terms (_sabr_, _tawbah_, _iman_) where they add texture.
+- Do NOT retranslate — use provided translations only to understand meaning.
+- Do NOT include the full Arabic text.
+
+CHARACTER LIMIT — MANDATORY TOOL WORKFLOW:
+Each caption file (ayah_caption.txt and hadith_caption.txt) is posted as a single WhatsApp status caption alongside its image. The file contains BOTH the Urdu and English sections together. WhatsApp clips at 700 characters — so the TOTAL combined length of each caption (Urdu + divider + English) must be strictly under 700 characters.
+
+Budget roughly: ~280 chars Urdu + 25 chars divider + ~280 chars English = ~585 chars safe target. Write tight.
+
+You have a tool called check_caption_lengths. You MUST follow this workflow — do not skip any step:
+1. Draft both captions (ayah + hadith), keeping both language sections brief.
+2. Call check_caption_lengths passing each FULL caption string as-is (including the divider line).
+3. If FAIL: shorten the over-limit caption — trim reflection/context first, never cut the opening hook or closing dua. Then call check_caption_lengths again.
+4. Repeat until check_caption_lengths returns PASS for both.
+5. Only THEN return the final WhatsAppCaptions output.
+
+You may NOT return output without receiving a PASS from check_caption_lengths.
+
+OUTPUT: Return exactly two fields — ayah_caption and hadith_caption. Each field contains both the Urdu and English sections separated by the divider shown above.
+
+WEB SEARCH: You have access to a web search tool. Use it only when you genuinely need a fact you are uncertain about — for example, the background of a narrator, the historical context of an event, the meaning of a specific Arabic term, or scholarly commentary on this particular verse or hadith. Do not search for things you already know confidently. When you do search, prefer established Islamic scholarship sites (sunnah.com, islamqa.info, seekersguidance.org, islamweb.net)."""
+
+        grade_note = f"\nHadith Grade: {hadith_grade}" if hadith_grade else ""
+
+        prompt = f"""Generate WhatsApp captions for today's Islamic content.
+
+--- AYAH ---
+Reference: {ayah_reference}
+Arabic: {ayah_arabic}
+Urdu: {ayah_urdu}
+English: {ayah_english}
+
+--- HADITH ---
+Reference: {hadith_reference}{grade_note}
+Arabic: {hadith_arabic}
+Urdu: {hadith_urdu}
+English: {hadith_english}"""
+
+        logger.info("Generating WhatsApp captions for ayah and hadith")
+
+        env_var = "GEMINI_API_KEY" if self.model.startswith("gemini") else "OPENAI_API_KEY"
+
+        saved_index = self.current_key_index
+        self.current_key_index = 0
+        last_error = None
+
+        for _ in range(len(self.api_keys)):
+            api_key = self._get_current_api_key()
+            old_key = os.environ.get(env_var)
+            os.environ[env_var] = api_key
+            try:
+                agent = Agent(self.model, output_type=WhatsAppCaptions, instructions=instructions, tools=[Tool(check_caption_lengths)], output_retries=3)
+                result = agent.run_sync(prompt)
+                logger.info("WhatsApp captions generated successfully")
+                return result.output
+            except Exception as e:
+                last_error = e
+                if self._is_rate_limit_error(e):
+                    logger.warning(f"Caption gen: rate limit on key {self.current_key_index + 1}: {e}")
+                    if not self._rotate_api_key():
+                        break
+                else:
+                    logger.warning(f"Caption gen: non-retryable error on key {self.current_key_index + 1}: {e}")
+                    break
+            finally:
+                if old_key is not None:
+                    os.environ[env_var] = old_key
+                elif env_var in os.environ:
+                    del os.environ[env_var]
+
+        self.current_key_index = saved_index
+
+        # OpenRouter fallback — use local instructions (not self.instructions which is for hadith translation)
+        if self.openrouter_api_key:
+            for or_model in self.openrouter_models:
+                try:
+                    logger.info(f"Attempting OpenRouter fallback for captions ({or_model})")
+                    model_obj = OpenRouterModel(
+                        or_model,
+                        provider=OpenRouterProvider(api_key=self.openrouter_api_key)
+                    )
+                    # OpenRouter uses OpenAIChatModel which doesn't support WebSearchTool
+                    agent = Agent(model_obj, output_type=WhatsAppCaptions, instructions=instructions, tools=[Tool(check_caption_lengths)])
+                    result = agent.run_sync(prompt)
+                    logger.info(f"WhatsApp captions generated via OpenRouter ({or_model})")
+                    return result.output
+                except Exception as e:
+                    last_error = e
+                    logger.warning(f"OpenRouter caption fallback failed ({or_model}): {e}")
+
+        raise Exception(f"WhatsApp caption generation failed (all providers exhausted): {str(last_error)}")
