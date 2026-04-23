@@ -204,13 +204,7 @@ def wait_for_user_input() -> bool:
         return False
 
 
-WHATSAPP_CHAR_LIMIT = 700
 CAPTION_DIVIDER = "─────────────────────────"
-
-
-def enforce_whatsapp_limit(caption: str, limit: int = WHATSAPP_CHAR_LIMIT) -> str:
-    """Hard-trim the full caption to the WhatsApp status character limit (last-resort fallback)."""
-    return caption.strip()[:limit]
 
 
 def save_content_json(date_output_dir: Path, edited_content: dict, ayah, hadith) -> Path:
@@ -286,7 +280,7 @@ def generate_captions_for_date(
     def save_caption(text: str, filename: str) -> None:
         path = date_output_dir / filename
         with open(path, 'w', encoding='utf-8') as f:
-            f.write(enforce_whatsapp_limit(text))
+            f.write(text)
         print(f"✓ Saved: {path}")
 
     if lang == 'both':

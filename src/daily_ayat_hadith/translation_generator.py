@@ -4,7 +4,8 @@ import logging
 import os
 from typing import Optional
 from pydantic import BaseModel, Field
-from pydantic_ai import Agent, Tool
+from pydantic_ai import Agent
+from pydantic_ai.builtin_tools import WebSearchTool
 from pydantic_ai.models.openrouter import OpenRouterModel
 from pydantic_ai.providers.openrouter import OpenRouterProvider
 from dotenv import load_dotenv
@@ -58,53 +59,6 @@ class WhatsAppCaptions(BaseModel):
             "Urdu section first, then a visual divider, then English. "
             "Uses WhatsApp markdown: *bold*, _italic_, > quotes, - bullets."
         )
-    )
-
-
-def check_caption_lengths(ayah_caption: str, hadith_caption: str) -> str:
-    """
-    Verify that each full caption (Urdu + divider + English combined) is within
-    WhatsApp's 700-character status limit.
-
-    Each caption file is posted as a single WhatsApp status caption alongside its
-    image — the file contains BOTH Urdu and English together, so the TOTAL length
-    of the whole string must be under 700 characters.
-
-    Pass the complete caption string for each (including the divider line).
-    If either fails, shorten it and call this tool again. Only return final output
-    after receiving PASS.
-
-    Args:
-        ayah_caption: The full ayah caption string (Urdu + divider + English).
-        hadith_caption: The full hadith caption string (Urdu + divider + English).
-
-    Returns:
-        PASS with character counts, or FAIL listing which captions are over and by
-        exactly how many characters.
-    """
-    limit = 700
-    captions = {"Ayah caption": ayah_caption, "Hadith caption": hadith_caption}
-
-    failures = []
-    counts = {}
-    for name, text in captions.items():
-        count = len(text.strip())
-        counts[name] = count
-        if count > limit:
-            failures.append(f"{name}: {count} chars ({count - limit} over)")
-
-    if not failures:
-        summary = ", ".join(f"{name}={count}" for name, count in counts.items())
-        return (
-            f"PASS — both captions within limit. Counts: {summary}. "
-            f"You may now return the final WhatsAppCaptions output."
-        )
-
-    summary = "; ".join(failures)
-    return (
-        f"FAIL — {len(failures)} caption(s) over limit: {summary}. "
-        f"Shorten the over-limit caption(s) — trim reflection/context first, "
-        f"never cut the opening hook or closing dua — then call check_caption_lengths again."
     )
 
 
@@ -550,56 +504,40 @@ Each caption has TWO PARTS: Urdu first, then English, separated by this exact di
 
 ─────────────────────────
 
-BUDGET REALITY — READ THIS FIRST:
-Total per caption file: under 700 chars (Urdu + divider + English combined).
-Safe target per language section: ~270 chars. That is tight. Every word must earn its place.
-Do not pad. Do not repeat across Urdu and English. Write like a poet, not a professor.
+WHATSAPP FORMATTING RULES (these are literal characters that render in WhatsApp):
+- *text* → bold (use for headings, key terms, the opening hook)
+- _text_ → italic (use for duas, Arabic terms, and the closing inspirational line)
+- > text → quote block (use for the central message or a key phrase)
+- - item → bullet point (use for action items)
+- Use line breaks generously — short paragraphs read better on mobile
 
-WHATSAPP FORMATTING (literal characters that render in WhatsApp):
-- *text* → bold — use for the hook and the action label only
-- _text_ → italic — use for the closing dua/line only
-- > text → quote block — use for the core message (one line)
-- Keep line breaks minimal — every newline costs characters
+CAPTION STRUCTURE (apply identically for both the Urdu and English sections):
 
-CAPTION STRUCTURE — 4 elements only, applied to EACH language section:
+1. *Opening hook* — One punchy line that makes someone STOP scrolling. Frame it as a question, a bold statement, or a relatable observation. Do NOT start with "Today's verse/hadith is..."
 
-1. *Hook* (~55 chars) — One line that stops the scroll. A question, a bold truth, or a relatable jab. No "Today's verse is..." Never generic.
+2. Brief context (1-3 sentences max) — only if genuinely needed to understand the content. Skip if the meaning is self-evident.
 
-2. > Core quote (~70 chars) — The single most powerful phrase from the content. Not a summary — the actual words that hit hardest.
+3. > The core message — quote the most powerful phrase or the key lesson directly from the content.
 
-3. Lesson (~90 chars) — One tight sentence connecting this wisdom to a real moment in someone's day. Specific beats general. No multi-sentence elaboration.
+4. Reflection (2-4 sentences) — connect this ancient wisdom to real, everyday modern life. Be specific. Give an example of how this applies to someone's day.
 
-4. _Action + Dua_ (~55 chars) — One concrete thing to do today fused with a short closing dua. One line. Make it linger.
+5. *آج کا عمل:* / *Today's Action:*
+   - 1 to 2 specific, immediately doable actions. Concrete, not vague. ("Read this dua before sleeping" not "reflect on this verse".)
 
-WHAT TO CUT when over budget (in order):
-- The lesson sentence (compress to a clause)
-- The hook (trim, don't cut entirely)
-- NEVER cut the quote or the closing dua
+6. _Closing line_ — a short, warm dua or motivation. End on something that lingers.
 
-TONE:
-- Warm, direct, like a knowledgeable older sibling — not a khutbah
-- If content is a warning, frame with compassion not fear
-- Ground in real life: WhatsApp group dramas, workplaces, family, scrolling at 2am
+TONE RULES:
+- Warm, direct, relatable — not preachy
+- If the content is a warning, frame it with compassion, not fear
+- Connect to everyday scenarios: workplace, family, social media, daily routines
+- Avoid academic vocabulary; aim for a Year 10 reading level
+- Use occasional transliterated Arabic terms (_iman_, _tawbah_, _sabr_) where they add depth
 
-LANGUAGE:
-- Urdu: conversational, not formal. Proper Urdu punctuation (۔ ، ؟). No scholarly register.
-- English: plain modern English. _Italic_ for Arabic terms (_sabr_, _tawbah_, _iman_) where they add texture.
-- Do NOT retranslate — use provided translations only to understand meaning.
-- Do NOT include the full Arabic text.
-
-CHARACTER LIMIT — MANDATORY TOOL WORKFLOW:
-Each caption file (ayah_caption.txt and hadith_caption.txt) is posted as a single WhatsApp status caption alongside its image. The file contains BOTH the Urdu and English sections together. WhatsApp clips at 700 characters — so the TOTAL combined length of each caption (Urdu + divider + English) must be strictly under 700 characters.
-
-Budget roughly: ~280 chars Urdu + 25 chars divider + ~280 chars English = ~585 chars safe target. Write tight.
-
-You have a tool called check_caption_lengths. You MUST follow this workflow — do not skip any step:
-1. Draft both captions (ayah + hadith), keeping both language sections brief.
-2. Call check_caption_lengths passing each FULL caption string as-is (including the divider line).
-3. If FAIL: shorten the over-limit caption — trim reflection/context first, never cut the opening hook or closing dua. Then call check_caption_lengths again.
-4. Repeat until check_caption_lengths returns PASS for both.
-5. Only THEN return the final WhatsAppCaptions output.
-
-You may NOT return output without receiving a PASS from check_caption_lengths.
+LANGUAGE RULES:
+- Urdu: Natural, conversational Urdu. Proper Urdu punctuation (۔ ، ؟). Not overly formal.
+- English: Modern, accessible. Occasional transliterated Arabic with _italics_.
+- Do NOT retranslate the ayah or hadith — use the provided translations only to understand the meaning.
+- Do NOT include the full Arabic text in the caption.
 
 OUTPUT: Return exactly two fields — ayah_caption and hadith_caption. Each field contains both the Urdu and English sections separated by the divider shown above.
 
@@ -634,7 +572,7 @@ English: {hadith_english}"""
             old_key = os.environ.get(env_var)
             os.environ[env_var] = api_key
             try:
-                agent = Agent(self.model, output_type=WhatsAppCaptions, instructions=instructions, tools=[Tool(check_caption_lengths)], output_retries=3)
+                agent = Agent(self.model, output_type=WhatsAppCaptions, instructions=instructions, builtin_tools=[WebSearchTool()])
                 result = agent.run_sync(prompt)
                 logger.info("WhatsApp captions generated successfully")
                 return result.output
@@ -645,7 +583,6 @@ English: {hadith_english}"""
                     if not self._rotate_api_key():
                         break
                 else:
-                    logger.warning(f"Caption gen: non-retryable error on key {self.current_key_index + 1}: {e}")
                     break
             finally:
                 if old_key is not None:
@@ -664,8 +601,7 @@ English: {hadith_english}"""
                         or_model,
                         provider=OpenRouterProvider(api_key=self.openrouter_api_key)
                     )
-                    # OpenRouter uses OpenAIChatModel which doesn't support WebSearchTool
-                    agent = Agent(model_obj, output_type=WhatsAppCaptions, instructions=instructions, tools=[Tool(check_caption_lengths)])
+                    agent = Agent(model_obj, output_type=WhatsAppCaptions, instructions=instructions, builtin_tools=[WebSearchTool()])
                     result = agent.run_sync(prompt)
                     logger.info(f"WhatsApp captions generated via OpenRouter ({or_model})")
                     return result.output
