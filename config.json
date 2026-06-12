@@ -1,5 +1,5 @@
 {
-  "hijri_offset_days": -1,
+  "hijri_offset_days": 0,
   "quran_api": {
     "enabled": true,
     "fallback_to_local": true,

@@ -131,6 +131,7 @@ class HadithProvider:
         Convert ScrapedHadith (from Sunnah.com) to Hadith dataclass.
 
         Gets Arabic and English from Sunnah.com, Urdu from local DB.
+        If Sunnah.com returned no English, falls back to AI translation.
         """
         # Get Urdu translation from local database
         urdu_translation = ""
@@ -142,13 +143,42 @@ class HadithProvider:
             except Exception as e:
                 logger.warning(f"Could not fetch Urdu from local DB: {e}")
 
+        english_translation = scraped.english_translation
+        english_from_ai = False
+
+        # If Sunnah.com returned no English, try AI translation
+        if not english_translation and self.translation_generator:
+            temp_hadith = Hadith(
+                hadith_number=scraped.hadith_number,
+                arabic_text=scraped.arabic_text,
+                urdu_translation=urdu_translation,
+                english_translation="",
+                grade=scraped.grade,
+                graded_by=scraped.graded_by
+            )
+            if self._is_weak_hadith(temp_hadith):
+                logger.info(f"Skipping AI translation for weak hadith {scraped.hadith_number}: {scraped.grade}")
+            else:
+                try:
+                    logger.info(f"Sunnah.com had no English — generating AI translation for hadith {scraped.hadith_number}")
+                    english_translation = self.translation_generator.get_english_translation(
+                        arabic_text=scraped.arabic_text,
+                        urdu_translation=urdu_translation,
+                        hadith_number=scraped.hadith_number
+                    )
+                    english_from_ai = True
+                    logger.info(f"AI translation generated for hadith {scraped.hadith_number}")
+                except Exception as e:
+                    logger.warning(f"AI translation failed for hadith {scraped.hadith_number}: {e}")
+
         return Hadith(
             hadith_number=scraped.hadith_number,
             arabic_text=scraped.arabic_text,
             urdu_translation=urdu_translation,
-            english_translation=scraped.english_translation,
+            english_translation=english_translation,
             grade=scraped.grade,
-            graded_by=scraped.graded_by
+            graded_by=scraped.graded_by,
+            english_from_ai=english_from_ai
         )
 
     def _convert_alhadees_to_hadith(self, scraped: AlHadeesScrapedHadith) -> Hadith:

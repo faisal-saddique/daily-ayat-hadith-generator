@@ -237,6 +237,155 @@ def save_content_json(date_output_dir: Path, edited_content: dict, ayah, hadith)
     return json_file
 
 
+def regenerate_from_content_json(
+    date_output_dir: Path,
+    image_gen: IslamicImageGenerator,
+) -> bool:
+    """
+    Regenerate images for a date using its existing content.json.
+
+    Reads content.json, removes old PNGs, regenerates images.
+    State is NOT updated — safe to run multiple times after editing content.json.
+
+    Args:
+        date_output_dir: Path to the date folder containing content.json
+        image_gen: Initialized image generator
+
+    Returns:
+        True on success, False on error
+    """
+    json_file = date_output_dir / "content.json"
+    if not json_file.exists():
+        print(f"Error: content.json not found in {date_output_dir}")
+        print("Run the generator first for this date to create content.json.")
+        return False
+
+    with open(json_file, 'r', encoding='utf-8') as f:
+        content = json.load(f)
+
+    print(f"\nRegenerating images for {content['date']} from content.json...")
+    print(f"  Source: {json_file}")
+
+    # Parse date for image header
+    target_datetime = datetime.strptime(content['date'], '%Y-%m-%d')
+
+    ayah = content['ayah']
+    hadith = content['hadith']
+
+    # Build filename fragment for ayah
+    start_ayah = ayah['start_ayah']
+    end_ayah = ayah['end_ayah']
+    ayah_ref_for_filename = (
+        str(start_ayah) if start_ayah == end_ayah else f"{start_ayah}-{end_ayah}"
+    )
+    surah_name = ayah['surah_name']
+
+    # Remove old PNGs so no stale pages remain
+    old_pngs = sorted(date_output_dir.glob("*.png"))
+    if old_pngs:
+        print(f"\nRemoving {len(old_pngs)} existing PNG(s)...")
+        for png in old_pngs:
+            png.unlink()
+            print(f"  ✓ Deleted: {png.name}")
+
+    print()
+    print("=" * 50)
+    print("GENERATING AYAH IMAGE")
+    print("=" * 50)
+
+    ayah_images = image_gen.generate_ayat_image(
+        surah_number=ayah['surah_number'],
+        ayah_number=end_ayah,
+        arabic_text=ayah['arabic'],
+        urdu_translation=ayah['urdu'],
+        english_translation=ayah['english'],
+        surah_name=surah_name,
+        date=target_datetime,
+        ayah_reference=ayah['reference'],
+    )
+
+    print()
+    for page_num, img in enumerate(ayah_images, 1):
+        if len(ayah_images) == 1:
+            filename = f"ayat_{surah_name.replace(' ', '_')}_{ayah_ref_for_filename}.png"
+        else:
+            filename = f"ayat_{surah_name.replace(' ', '_')}_{ayah_ref_for_filename}_page{page_num}.png"
+        out_path = date_output_dir / filename
+        img.save(out_path, quality=95)
+        if len(ayah_images) == 1:
+            print(f"✓ Ayah image saved: {out_path}")
+        else:
+            print(f"✓ Ayah page {page_num} saved: {out_path}")
+
+    print()
+    print("=" * 50)
+    print("GENERATING HADITH IMAGE")
+    print("=" * 50)
+
+    hadith_images = image_gen.generate_hadith_image(
+        hadith_number=hadith['number'],
+        arabic_text=hadith['arabic'],
+        urdu_translation=hadith['urdu'],
+        english_translation=hadith['english'],
+        date=target_datetime,
+        grade=hadith.get('grade', ''),
+        graded_by=hadith.get('graded_by', ''),
+    )
+
+    print()
+    for page_num, img in enumerate(hadith_images, 1):
+        if len(hadith_images) == 1:
+            filename = f"hadith_mishkaat_{hadith['number']}.png"
+        else:
+            filename = f"hadith_mishkaat_{hadith['number']}_page{page_num}.png"
+        out_path = date_output_dir / filename
+        img.save(out_path, quality=95)
+        if len(hadith_images) == 1:
+            print(f"✓ Hadith image saved: {out_path}")
+        else:
+            print(f"✓ Hadith page {page_num} saved: {out_path}")
+
+    print()
+    print("=" * 50)
+    print(f"✓ Done! Regenerated images for {content['date']}")
+    print("  State was NOT updated — content.json is unchanged.")
+    print("=" * 50)
+
+    return True
+
+
+def _resolve_regen_path(arg: str, output_dir: Path) -> Optional[Path]:
+    """
+    Resolve --regenerate argument to an absolute folder path.
+
+    Accepts:
+      - Absolute path:        /path/to/output/2026-05-22
+      - Relative path:        output/2026-05-22
+      - Date string only:     2026-05-22  (looked up in output_dir)
+    """
+    # Try as date string first (YYYY-MM-DD)
+    try:
+        datetime.strptime(arg, '%Y-%m-%d')
+        candidate = output_dir / arg
+        if candidate.exists():
+            return candidate
+        # Return even if not yet created — let caller emit the error
+        return candidate
+    except ValueError:
+        pass
+
+    # Resolve as path (absolute or relative to CWD)
+    p = Path(arg)
+    if p.is_absolute():
+        return p
+    resolved = p.resolve()
+    if resolved.exists():
+        return resolved
+    # Last try: relative to output_dir
+    candidate = output_dir / arg
+    return candidate
+
+
 def generate_captions_for_date(
     target_date: date,
     output_dir: Path,
@@ -632,6 +781,8 @@ Examples:
   %(prog)s --captions --date 2026-04-15             Captions for a specific date
   %(prog)s --captions --lang urdu                   Urdu captions only
   %(prog)s --captions --date 2026-04-15 --lang english   English captions for a date
+  %(prog)s --regenerate 2026-05-22              Regenerate images from content.json
+  %(prog)s --regenerate output/2026-05-22       Same with explicit folder path
 """
     )
     parser.add_argument(
@@ -662,6 +813,15 @@ Examples:
         default='both',
         help='Language(s) for captions: both (default), urdu, or english'
     )
+    parser.add_argument(
+        '--regenerate',
+        metavar='FOLDER',
+        help=(
+            'Regenerate images from an existing content.json. '
+            'Accepts a date (2026-05-22), a relative path (output/2026-05-22), '
+            'or an absolute path. Edit content.json first, then run this command.'
+        )
+    )
     args = parser.parse_args()
 
     # Setup paths
@@ -674,6 +834,18 @@ Examples:
 
     # Ensure output directory exists
     output_dir.mkdir(exist_ok=True)
+
+    # --regenerate mode: load content.json, delete old PNGs, regenerate images
+    if args.regenerate:
+        regen_path = _resolve_regen_path(args.regenerate, output_dir)
+        if not regen_path or not regen_path.exists():
+            print(f"Error: Folder not found: {regen_path}")
+            print("Provide a valid date (2026-05-22) or path to the output folder.")
+            sys.exit(1)
+
+        image_gen = IslamicImageGenerator(fonts_dir)
+        success = regenerate_from_content_json(regen_path, image_gen)
+        sys.exit(0 if success else 1)
 
     # --captions mode: minimal init, generate captions, done
     if args.captions:

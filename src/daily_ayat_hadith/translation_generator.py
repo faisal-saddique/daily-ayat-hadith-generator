@@ -98,7 +98,7 @@ class TranslationGenerator:
 
         # OpenRouter as final fallback (when all primary keys are exhausted)
         self.openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
-        self.openrouter_models = ["google/gemini-2.0-flash-001", "anthropic/claude-sonnet-4-5"]
+        self.openrouter_models = ["anthropic/claude-sonnet-4-5"]
         if self.openrouter_api_key:
             logger.info(f"OpenRouter fallback available ({', '.join(self.openrouter_models)})")
 
@@ -188,7 +188,8 @@ This translation will be shared publicly, so it MUST be accurate and authentic."
             model_name,
             provider=OpenRouterProvider(api_key=self.openrouter_api_key)
         )
-        return Agent(model, output_type=output_type, instructions=self.instructions)
+        return Agent(model, output_type=output_type, instructions=self.instructions,
+                     model_settings={"max_tokens": 2000})
 
     def _create_agent_with_key(self, api_key: str) -> Agent:
         """Create a new agent instance with the specified API key."""
