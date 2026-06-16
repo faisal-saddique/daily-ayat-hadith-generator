@@ -12,6 +12,8 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 
+from hijridate import Gregorian
+
 from .database import IslamicDatabase
 from .state import StateManager
 from .image_generator import IslamicImageGenerator
@@ -25,6 +27,23 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
+
+_HIJRI_MONTHS = ["", "Muharram", "Safar", "Rabi' al-Awwal", "Rabi' al-Thani",
+                 "Jumada al-Awwal", "Jumada al-Thani", "Rajab", "Sha'ban",
+                 "Ramadan", "Shawwal", "Dhul-Qi'dah", "Dhul-Hijjah"]
+
+
+def _ordinal(n: int) -> str:
+    if 10 <= n % 100 <= 20:
+        return 'th'
+    return {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')
+
+
+def compute_islamic_date_str(dt: datetime, hijri_offset_days: int = 0) -> str:
+    """Return Hijri date string like '30th Dhul-Hijjah, 1447AH'."""
+    adjusted = dt + timedelta(days=hijri_offset_days)
+    h = Gregorian(adjusted.year, adjusted.month, adjusted.day).to_hijri()
+    return f"{h.day}{_ordinal(h.day)} {_HIJRI_MONTHS[h.month]}, {h.year}AH"
 
 
 def create_review_file(date_output_dir: Path, ayah, hadith) -> Path:
@@ -207,7 +226,8 @@ def wait_for_user_input() -> bool:
 CAPTION_DIVIDER = "─────────────────────────"
 
 
-def save_content_json(date_output_dir: Path, edited_content: dict, ayah, hadith) -> Path:
+def save_content_json(date_output_dir: Path, edited_content: dict, ayah, hadith,
+                      islamic_date: str = None) -> Path:
     """Persist the day's final content to JSON for later caption generation."""
     content_data = {
         "date": str(date_output_dir.name),
@@ -231,6 +251,8 @@ def save_content_json(date_output_dir: Path, edited_content: dict, ayah, hadith)
             "english": edited_content['hadith']['english'],
         }
     }
+    if islamic_date:
+        content_data["islamic_date"] = islamic_date
     json_file = date_output_dir / "content.json"
     with open(json_file, 'w', encoding='utf-8') as f:
         json.dump(content_data, f, ensure_ascii=False, indent=2)
@@ -268,6 +290,9 @@ def regenerate_from_content_json(
 
     # Parse date for image header
     target_datetime = datetime.strptime(content['date'], '%Y-%m-%d')
+    islamic_date_override = content.get('islamic_date')
+    if islamic_date_override:
+        print(f"  Islamic date override: {islamic_date_override}")
 
     ayah = content['ayah']
     hadith = content['hadith']
@@ -302,6 +327,7 @@ def regenerate_from_content_json(
         surah_name=surah_name,
         date=target_datetime,
         ayah_reference=ayah['reference'],
+        islamic_date_override=islamic_date_override,
     )
 
     print()
@@ -744,7 +770,8 @@ def generate_for_date(
             print(f"✓ Deleted review file: {review_file}")
 
     # Save final content to JSON for later caption generation
-    content_json = save_content_json(date_output_dir, edited_content, ayah, hadith)
+    islamic_date = compute_islamic_date_str(target_datetime, image_gen.hijri_offset_days)
+    content_json = save_content_json(date_output_dir, edited_content, ayah, hadith, islamic_date)
     print(f"✓ Content saved: {content_json.name}")
     print(f"  (Run with --captions to generate WhatsApp captions for this date)")
 

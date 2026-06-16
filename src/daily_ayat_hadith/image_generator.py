@@ -320,12 +320,15 @@ class IslamicImageGenerator:
     def generate_ayat_image(self, surah_number: int, ayah_number: int,
                            arabic_text: str, urdu_translation: str,
                            english_translation: str, surah_name: str,
-                           date: datetime, ayah_reference: str = None) -> list[Image.Image]:
+                           date: datetime, ayah_reference: str = None,
+                           islamic_date_override: str = None) -> list[Image.Image]:
         """Generate Ayat image(s). Returns a list of images - single image for short ayat, two images for long ones.
 
         Args:
             ayah_reference: Optional custom reference string (e.g., "Al-Fatiha 1-3" for combined ayahs).
                            If not provided, uses "{surah_name} {ayah_number}".
+            islamic_date_override: Optional pre-formatted Hijri date string (e.g., "30th Dhul-Hijjah, 1447AH").
+                                   When provided, skips computing the date from the Gregorian date.
         """
 
         # Use provided reference or construct default
@@ -351,19 +354,22 @@ class IslamicImageGenerator:
         if scaling['font_scale'] < 0.75:
             return self._generate_ayat_multipage(
                 surah_number, ayah_number, arabic_text, urdu_translation,
-                english_translation, surah_name, date, ayah_reference
+                english_translation, surah_name, date, ayah_reference,
+                islamic_date_override
             )
 
         # Otherwise use single-page layout
         return [self._generate_ayat_single_page(
             surah_number, ayah_number, arabic_text, urdu_translation,
-            english_translation, surah_name, date, scaling, ayah_reference
+            english_translation, surah_name, date, scaling, ayah_reference,
+            islamic_date_override
         )]
 
     def _generate_ayat_single_page(self, surah_number: int, ayah_number: int,
                                    arabic_text: str, urdu_translation: str,
                                    english_translation: str, surah_name: str,
-                                   date: datetime, scaling: dict, ayah_reference: str) -> Image.Image:
+                                   date: datetime, scaling: dict, ayah_reference: str,
+                                   islamic_date_override: str = None) -> Image.Image:
         """Generate a single-page ayat image."""
 
         # Create image
@@ -411,13 +417,15 @@ class IslamicImageGenerator:
         y = self._draw_centered_text(draw, reference, y, reference_font, self.text_color)
 
         # Date (Islamic calendar) at fixed bottom position
-        # Apply offset for local moon sighting differences
-        adjusted_date = date + timedelta(days=self.hijri_offset_days)
-        hijri_date = Gregorian(adjusted_date.year, adjusted_date.month, adjusted_date.day).to_hijri()
-        hijri_months = ["", "Muharram", "Safar", "Rabi' al-Awwal", "Rabi' al-Thani",
-                       "Jumada al-Awwal", "Jumada al-Thani", "Rajab", "Sha'ban",
-                       "Ramadan", "Shawwal", "Dhul-Qi'dah", "Dhul-Hijjah"]
-        date_str = f"({hijri_date.day}{self._get_ordinal_suffix(hijri_date.day)} {hijri_months[hijri_date.month]}, {hijri_date.year}AH)"
+        if islamic_date_override:
+            date_str = f"({islamic_date_override})"
+        else:
+            adjusted_date = date + timedelta(days=self.hijri_offset_days)
+            hijri_date = Gregorian(adjusted_date.year, adjusted_date.month, adjusted_date.day).to_hijri()
+            hijri_months = ["", "Muharram", "Safar", "Rabi' al-Awwal", "Rabi' al-Thani",
+                           "Jumada al-Awwal", "Jumada al-Thani", "Rajab", "Sha'ban",
+                           "Ramadan", "Shawwal", "Dhul-Qi'dah", "Dhul-Hijjah"]
+            date_str = f"({hijri_date.day}{self._get_ordinal_suffix(hijri_date.day)} {hijri_months[hijri_date.month]}, {hijri_date.year}AH)"
         self._draw_centered_text(draw, date_str, self.height - 100, date_font, self.text_color)
 
         return img
@@ -425,7 +433,8 @@ class IslamicImageGenerator:
     def _generate_ayat_multipage(self, surah_number: int, ayah_number: int,
                                 arabic_text: str, urdu_translation: str,
                                 english_translation: str, surah_name: str,
-                                date: datetime, ayah_reference: str) -> list[Image.Image]:
+                                date: datetime, ayah_reference: str,
+                                islamic_date_override: str = None) -> list[Image.Image]:
         """Generate two-page ayat layout for very long verses.
 
         Page 1: Arabic + Urdu
@@ -439,7 +448,8 @@ class IslamicImageGenerator:
 
         # PAGE 2: English
         page2 = self._generate_ayat_page2(
-            surah_number, ayah_number, english_translation, surah_name, date, ayah_reference
+            surah_number, ayah_number, english_translation, surah_name, date, ayah_reference,
+            islamic_date_override
         )
 
         return [page1, page2]
@@ -510,7 +520,8 @@ class IslamicImageGenerator:
 
     def _generate_ayat_page2(self, surah_number: int, ayah_number: int,
                             english_translation: str, surah_name: str,
-                            date: datetime, ayah_reference: str) -> Image.Image:
+                            date: datetime, ayah_reference: str,
+                            islamic_date_override: str = None) -> Image.Image:
         """Generate page 2 of multi-page ayat: English translation."""
 
         aoozubillah_bismillah = "أَعُوذُ بِاللَّهِ مِنَ الشَّيْطَانِ الرَّجِيمِ ۞ بِسۡمِ اللّٰهِ الرَّحۡمٰنِ الرَّحِیۡمِ ۞"
@@ -558,12 +569,15 @@ class IslamicImageGenerator:
         y = self._draw_centered_text(draw, reference, y, reference_font, self.text_color)
 
         # Date (Islamic calendar) at bottom
-        adjusted_date = date + timedelta(days=self.hijri_offset_days)
-        hijri_date = Gregorian(adjusted_date.year, adjusted_date.month, adjusted_date.day).to_hijri()
-        hijri_months = ["", "Muharram", "Safar", "Rabi' al-Awwal", "Rabi' al-Thani",
-                       "Jumada al-Awwal", "Jumada al-Thani", "Rajab", "Sha'ban",
-                       "Ramadan", "Shawwal", "Dhul-Qi'dah", "Dhul-Hijjah"]
-        date_str = f"({hijri_date.day}{self._get_ordinal_suffix(hijri_date.day)} {hijri_months[hijri_date.month]}, {hijri_date.year}AH)"
+        if islamic_date_override:
+            date_str = f"({islamic_date_override})"
+        else:
+            adjusted_date = date + timedelta(days=self.hijri_offset_days)
+            hijri_date = Gregorian(adjusted_date.year, adjusted_date.month, adjusted_date.day).to_hijri()
+            hijri_months = ["", "Muharram", "Safar", "Rabi' al-Awwal", "Rabi' al-Thani",
+                           "Jumada al-Awwal", "Jumada al-Thani", "Rajab", "Sha'ban",
+                           "Ramadan", "Shawwal", "Dhul-Qi'dah", "Dhul-Hijjah"]
+            date_str = f"({hijri_date.day}{self._get_ordinal_suffix(hijri_date.day)} {hijri_months[hijri_date.month]}, {hijri_date.year}AH)"
         self._draw_centered_text(draw, date_str, self.height - 100, date_font, self.text_color)
 
         return img
