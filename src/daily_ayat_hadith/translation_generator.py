@@ -2,6 +2,7 @@
 
 import logging
 import os
+import time
 from typing import Optional
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent
@@ -182,6 +183,27 @@ This translation will be shared publicly, so it MUST be accurate and authentic."
             "unavailable" in error_str
         )
 
+    def _is_overloaded_error(self, error: Exception) -> bool:
+        """Check if error is a transient 'high demand' 503 (worth retrying same key)."""
+        error_str = str(error).lower()
+        return "503" in str(error) or "unavailable" in error_str
+
+    def _run_with_backoff(self, agent: Agent, prompt: str, key_label: str, backoffs=(2, 4)):
+        """
+        Run agent.run_sync, retrying with backoff on transient 503 overload errors.
+        Raises the last exception if all retries (and the initial attempt) fail.
+        """
+        for attempt, delay in enumerate((0, *backoffs)):
+            if delay:
+                logger.info(f"503 overload on {key_label}, retrying in {delay}s...")
+                time.sleep(delay)
+            try:
+                return agent.run_sync(prompt)
+            except Exception as e:
+                if attempt == len(backoffs) or not self._is_overloaded_error(e):
+                    raise
+        raise RuntimeError("unreachable")
+
     def _create_openrouter_agent(self, output_type, model_name: str) -> Agent:
         """Create an agent using OpenRouter as fallback provider."""
         model = OpenRouterModel(
@@ -259,7 +281,9 @@ This translation will be shared publicly, so it MUST be accurate and authentic."
             try:
                 # Create agent with current API key
                 agent = self._create_agent_with_key(current_key)
-                result = agent.run_sync(prompt)
+                result = self._run_with_backoff(
+                    agent, prompt, f"API key {self.current_key_index + 1}/{len(self.api_keys)}"
+                )
                 translation = result.output
 
                 logger.info(
@@ -355,7 +379,7 @@ This translation will be shared publicly, so it MUST be accurate and authentic."
             FixedTexts with corrected translations. On failure, returns originals unchanged.
         """
         instructions = """You are an expert Islamic scholar and editor fluent in both Urdu and English.
-Fix punctuation and diacritics in the provided Islamic translations.
+Fix punctuation, diacritics, and obvious spelling typos in the provided Islamic translations.
 
 CRITICAL: You MUST return the COMPLETE text for each field. Do NOT truncate, summarize, or shorten any text. Every word of the input must appear in the output.
 
@@ -365,7 +389,11 @@ FOR URDU TEXTS:
    - ، for comma (never Latin ,)
    - ؟ for question mark (never Latin ?)
 2. Fix spacing around punctuation marks
-3. Do NOT change any wording or meaning
+3. Fix OBVIOUS spelling/typing mistakes only — extra, missing, or duplicated letters that produce a
+   non-existent or grammatically wrong word. Scan the ENTIRE text carefully for such mistakes, not
+   just the first one you notice. Only fix a word when you are certain it is a typo, not a valid word,
+   dialect, or stylistic choice. Do NOT change any wording, phrasing, or meaning otherwise — never
+   rewrite, rephrase, or substitute words.
 4. Return the FULL text - do not cut it short even if it seems long
 
 FOR ENGLISH TEXTS:
@@ -377,8 +405,9 @@ FOR ENGLISH TEXTS:
    - Long vowels: ā (alif), ī (ya), ū (waw)
    - Examples: Abū, Muḥammad, Ḥadīth, Salāh, Zakāh, Ṣaḥābah, ʿĀʾishah, Dāwūd
    - Use ʿ for ʿayn (ع) and ʾ for hamzah (ء) where appropriate
-3. Do NOT change any wording or meaning
-4. Return the FULL text - do not cut it short even if it seems long
+4. Fix OBVIOUS spelling typos only when certain — do not rewrite or rephrase
+5. Do NOT change any wording or meaning
+6. Return the FULL text - do not cut it short even if it seems long
 
 Return each corrected text in its corresponding output field. The output length should be similar to the input length."""
 
@@ -423,7 +452,9 @@ Return each corrected text in its corresponding output field. The output length 
             os.environ[env_var] = api_key
             try:
                 agent = Agent(self.model, output_type=FixedTexts, instructions=instructions)
-                result = agent.run_sync(prompt)
+                result = self._run_with_backoff(
+                    agent, prompt, f"API key {self.current_key_index + 1}/{len(self.api_keys)}"
+                )
                 fixed = result.output
                 logger.info("Punctuation fixed for all translations")
                 return FixedTexts(

@@ -6,8 +6,8 @@
     "comment": "Credentials loaded from .env (QURAN_API_CLIENT_ID / QURAN_API_CLIENT_SECRET)"
   },
   "translations": {
-    "urdu": "Maududi",
-    "english": "MaududiEn",
+    "urdu": "Taqi",
+    "english": "TaqiEnglish",
     "available_urdu": [
       "Maududi",
       "Jalandhary",
@@ -70,7 +70,7 @@
     "image_quality": 95
   },
   "tts": {
-    "enabled": true,
+    "enabled": false,
     "provider": "gemini",
     "generate": {
       "ayah_english": true,

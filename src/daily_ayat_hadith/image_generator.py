@@ -201,6 +201,42 @@ class IslamicImageGenerator:
             total_height += (bbox[3] - bbox[1]) + line_spacing
         return total_height - line_spacing  # Remove last line spacing
 
+    def _measure_height(self, text: str, font: ImageFont.FreeTypeFont) -> int:
+        """Measure the rendered height of a single line of text."""
+        bbox = font.getbbox(text)
+        return bbox[3] - bbox[1]
+
+    def _paginate_lines(self, lines: list[str], font: ImageFont.FreeTypeFont,
+                         line_spacing: int, available_height: int) -> list[list[str]]:
+        """Split wrapped lines into page-sized chunks that each fit within available_height.
+
+        Used for content too long to shrink-to-fit on one page - spills onto
+        additional pages instead of overflowing past the footer.
+        """
+        if not lines:
+            return [[]]
+
+        pages = []
+        current: list[str] = []
+        current_height = 0
+
+        for line in lines:
+            line_height = self._measure_height(line, font)
+            addition = line_height if not current else line_height + line_spacing
+
+            if current and current_height + addition > available_height:
+                pages.append(current)
+                current = [line]
+                current_height = line_height
+            else:
+                current.append(line)
+                current_height += addition
+
+        if current:
+            pages.append(current)
+
+        return pages
+
     def _calculate_adaptive_layout(self, content_blocks: list[dict], max_height: int) -> dict:
         """Calculate optimal font sizes and spacing to fit content within max_height.
         Scales up for short content, scales down for long content.
@@ -904,167 +940,112 @@ class IslamicImageGenerator:
     def _generate_hadith_threepage(self, hadith_number: int, arabic_text: str,
                                    urdu_translation: str, english_translation: str,
                                    date: datetime, grade: str, graded_by: str) -> list[Image.Image]:
-        """Generate three-page hadith layout for extremely long hadiths.
+        """Generate a dedicated-page-per-language hadith layout for extremely long hadiths.
 
-        Page 1: Arabic only
-        Page 2: Urdu only
-        Page 3: English
+        Arabic, Urdu, and English are each rendered at a fixed, comfortably
+        readable font size and split across as many pages as needed to hold
+        them - rather than shrinking fonts to an unreadable floor and risking
+        overflow past the footer. Very long hadiths (e.g. the three-men-in-a-cave
+        hadith, Mishkaat 4938) may therefore span more than 3 pages.
         """
 
         aoozubillah_bismillah = "أَعُوذُ بِاللَّهِ مِنَ الشَّيْطَانِ الرَّجِيمِ ۞ بِسۡمِ اللّٰهِ الرَّحۡمٰنِ الرَّحِیۡمِ ۞"
 
-        # PAGE 1: Arabic only
-        page1 = Image.new('RGB', (self.width, self.height), self.bg_color)
-        draw1 = ImageDraw.Draw(page1)
-
-        # Calculate scaling for Arabic page
-        # Slightly larger Arabic font (68px) for dedicated page
-        content_blocks_p1 = [
-            {'text': aoozubillah_bismillah, 'font_size': 54, 'font_path': self.arabic_font_path, 'type': 'single', 'spacing_after': 60},
-            {'text': self._get_display_text(arabic_text, use_raqm=True), 'font_size': 68, 'font_path': self.arabic_font_path, 'type': 'multi', 'line_spacing': 18, 'margin': 100, 'spacing_after': 60},
-        ]
-
-        max_content_height = self.height - 300
-        scaling_p1 = self._calculate_adaptive_layout(content_blocks_p1, max_content_height)
-
-        header_font = ImageFont.truetype(str(self.arabic_font_path), int(54 * scaling_p1['font_scale']), layout_engine=LAYOUT_ENGINE)
-        arabic_font = ImageFont.truetype(str(self.arabic_font_path), int(68 * scaling_p1['font_scale']), layout_engine=LAYOUT_ENGINE)
+        header_font = ImageFont.truetype(str(self.arabic_font_path), 54, layout_engine=LAYOUT_ENGINE)
         reference_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 40)
         continuation_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 36)
         page_indicator_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 32)
+        grading_font = ImageFont.truetype(str(self.arabic_font_path), 38, layout_engine=LAYOUT_ENGINE)
+        date_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 38)
 
-        y = 80
-
-        # Page indicator
-        page_text = "(Page 1 of 3)"
-        self._draw_centered_text(draw1, page_text, y, page_indicator_font, (100, 100, 100))
-        y += 60
-
-        # Bismillah
         header_display = self._get_display_text(aoozubillah_bismillah, use_raqm=True)
-        y = self._draw_centered_text(draw1, header_display, y, header_font, self.text_color)
-        y += int(60 * scaling_p1['spacing_scale'])
+        header_height = self._measure_height(header_display, header_font)
 
-        # Arabic hadith
+        reference_text = f"(Mishkaat {hadith_number})"
+        reference_height = self._measure_height(reference_text, reference_font)
+
+        grading_display = None
+        grading_height = 0
+        if grade:
+            grading_display = self._get_display_text(f"حكم : {grade}", use_raqm=True)
+            grading_height = self._measure_height(grading_display, grading_font)
+
+        # Fixed vertical rhythm shared by every page
+        TOP_Y = 80
+        INDICATOR_SPACING = 60
+        HEADER_SPACING = 60
+        BODY_SPACING = 60
+        GRADING_SPACING = 50
+        FOOTER_SAFETY_GAP = 40  # kept clear above the fixed footer line at height - 100
+
+        body_start_y = TOP_Y + INDICATOR_SPACING + header_height + HEADER_SPACING
+        footer_line_y = self.height - 100
+        available_height = footer_line_y - FOOTER_SAFETY_GAP - reference_height - BODY_SPACING - body_start_y
+        urdu_available_height = available_height - (grading_height + GRADING_SPACING if grade else 0)
+
+        # Arabic - dedicated larger font (68px)
+        arabic_font = ImageFont.truetype(str(self.arabic_font_path), 68, layout_engine=LAYOUT_ENGINE)
         arabic_display = self._get_display_text(arabic_text, use_raqm=True)
         arabic_lines = self._wrap_text(arabic_display, arabic_font, self.width - 100)
-        y = self._draw_multiline_centered(draw1, arabic_lines, y, arabic_font, self.text_color, int(18 * scaling_p1['spacing_scale']))
-        y += int(60 * scaling_p1['spacing_scale'])
+        arabic_pages = self._paginate_lines(arabic_lines, arabic_font, 18, available_height)
 
-        # Reference
-        reference = f"(Mishkaat {hadith_number})"
-        y = self._draw_centered_text(draw1, reference, y, reference_font, self.text_color)
-
-        # Continuation indicator
-        continuation_text = "Urdu translation on next page >>"
-        self._draw_centered_text(draw1, continuation_text, self.height - 100, continuation_font, (100, 100, 100))
-
-        # PAGE 2: Urdu only
-        page2 = Image.new('RGB', (self.width, self.height), self.bg_color)
-        draw2 = ImageDraw.Draw(page2)
-
-        # Calculate scaling for Urdu page
-        # Slightly larger Urdu font (63px) for dedicated page
-        content_blocks_p2 = [
-            {'text': aoozubillah_bismillah, 'font_size': 54, 'font_path': self.arabic_font_path, 'type': 'single', 'spacing_after': 60},
-            {'text': self._get_display_text(urdu_translation, use_raqm=True), 'font_size': 63, 'font_path': self.urdu_font_path, 'type': 'multi', 'line_spacing': 15, 'margin': 120, 'spacing_after': 60},
-        ]
-
-        if grade:
-            grading_text = f"حكم : {grade}"
-            content_blocks_p2.append({'text': self._get_display_text(grading_text, use_raqm=True), 'font_size': 38, 'font_path': self.arabic_font_path, 'type': 'single', 'spacing_after': 50})
-
-        scaling_p2 = self._calculate_adaptive_layout(content_blocks_p2, max_content_height)
-
-        header_font2 = ImageFont.truetype(str(self.arabic_font_path), int(54 * scaling_p2['font_scale']), layout_engine=LAYOUT_ENGINE)
-        urdu_font = ImageFont.truetype(str(self.urdu_font_path), int(63 * scaling_p2['font_scale']), layout_engine=LAYOUT_ENGINE)
-        grading_font = ImageFont.truetype(str(self.arabic_font_path), int(38 * scaling_p2['font_scale']), layout_engine=LAYOUT_ENGINE)
-        reference_font2 = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 40)
-        continuation_font2 = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 36)
-        page_indicator_font2 = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 32)
-
-        y = 80
-
-        # Page indicator
-        page_text = "(Page 2 of 3)"
-        self._draw_centered_text(draw2, page_text, y, page_indicator_font2, (100, 100, 100))
-        y += 60
-
-        # Bismillah
-        header_display = self._get_display_text(aoozubillah_bismillah, use_raqm=True)
-        y = self._draw_centered_text(draw2, header_display, y, header_font2, self.text_color)
-        y += int(60 * scaling_p2['spacing_scale'])
-
-        # Urdu translation
+        # Urdu - dedicated larger font (63px)
+        urdu_font = ImageFont.truetype(str(self.urdu_font_path), 63, layout_engine=LAYOUT_ENGINE)
         urdu_display = self._get_display_text(urdu_translation, use_raqm=True)
         urdu_lines = self._wrap_text(urdu_display, urdu_font, self.width - 120)
-        y = self._draw_multiline_centered(draw2, urdu_lines, y, urdu_font, self.text_color, int(15 * scaling_p2['spacing_scale']))
-        y += int(60 * scaling_p2['spacing_scale'])
+        urdu_pages = self._paginate_lines(urdu_lines, urdu_font, 15, urdu_available_height)
 
-        # Grading
-        if grade:
-            grading_text = f"حكم : {grade}"
-            grading_display = self._get_display_text(grading_text, use_raqm=True)
-            y = self._draw_centered_text(draw2, grading_display, y, grading_font, self.text_color)
-            y += int(50 * scaling_p2['spacing_scale'])
-
-        # Reference
-        reference = f"(Mishkaat {hadith_number})"
-        y = self._draw_centered_text(draw2, reference, y, reference_font2, self.text_color)
-
-        # Continuation indicator
-        continuation_text = "English translation on next page >>"
-        self._draw_centered_text(draw2, continuation_text, self.height - 100, continuation_font2, (100, 100, 100))
-
-        # PAGE 3: English (reuse existing method with page number adjustment)
-        page3 = Image.new('RGB', (self.width, self.height), self.bg_color)
-        draw3 = ImageDraw.Draw(page3)
-
+        # English - dedicated larger font (56px)
+        english_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 56)
         english_clean = self._replace_arabic_symbols_for_english(english_translation)
+        english_lines = self._wrap_text(english_clean, english_font, self.width - 140)
+        english_pages = self._paginate_lines(english_lines, english_font, 12, available_height)
 
-        # Calculate optimal scaling for English page
-        # Slightly larger English font (54px) for dedicated page
-        content_blocks_p3 = [
-            {'text': aoozubillah_bismillah, 'font_size': 54, 'font_path': self.arabic_font_path, 'type': 'single', 'spacing_after': 60},
-            {'text': english_clean, 'font_size': 54, 'font_path': '/System/Library/Fonts/Helvetica.ttc', 'type': 'multi', 'line_spacing': 12, 'margin': 140, 'spacing_after': 60},
+        total_pages = len(arabic_pages) + len(urdu_pages) + len(english_pages)
+
+        sections = [
+            ('arabic', arabic_pages, arabic_font, 18, "Urdu translation on next page >>"),
+            ('urdu', urdu_pages, urdu_font, 15, "English translation on next page >>"),
+            ('english', english_pages, english_font, 12, None),
         ]
 
-        # Reserve more space at bottom for reference and date (300px total)
-        max_content_height_p3 = self.height - 300
-        scaling_p3 = self._calculate_adaptive_layout(content_blocks_p3, max_content_height_p3)
+        images = []
+        page_num = 0
 
-        header_font3 = ImageFont.truetype(str(self.arabic_font_path), int(54 * scaling_p3['font_scale']), layout_engine=LAYOUT_ENGINE)
-        english_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", int(56 * scaling_p3['font_scale']))
-        reference_font3 = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 40)
-        date_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 38)
-        page_indicator_font3 = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 32)
+        for section_name, pages, font, line_spacing, next_section_label in sections:
+            for i, page_lines in enumerate(pages):
+                page_num += 1
+                is_last_in_section = (i == len(pages) - 1)
 
-        y = 80
+                img = Image.new('RGB', (self.width, self.height), self.bg_color)
+                draw = ImageDraw.Draw(img)
 
-        # Page indicator
-        page_text = "(Page 3 of 3)"
-        self._draw_centered_text(draw3, page_text, y, page_indicator_font3, (100, 100, 100))
-        y += 60
+                y = TOP_Y
+                self._draw_centered_text(draw, f"(Page {page_num} of {total_pages})", y, page_indicator_font, (100, 100, 100))
+                y += INDICATOR_SPACING
 
-        # Bismillah
-        header_display = self._get_display_text(aoozubillah_bismillah, use_raqm=True)
-        y = self._draw_centered_text(draw3, header_display, y, header_font3, self.text_color)
-        y += int(60 * scaling_p3['spacing_scale'])
+                y = self._draw_centered_text(draw, header_display, y, header_font, self.text_color)
+                y += HEADER_SPACING
 
-        # English translation
-        english_lines = self._wrap_text(english_clean, english_font, self.width - 140)
-        y = self._draw_multiline_centered(draw3, english_lines, y, english_font, self.text_color, int(12 * scaling_p3['spacing_scale']))
-        y += int(60 * scaling_p3['spacing_scale'])
+                y = self._draw_multiline_centered(draw, page_lines, y, font, self.text_color, line_spacing)
+                y += BODY_SPACING
 
-        # Reference
-        reference = f"(Mishkaat {hadith_number})"
-        y = self._draw_centered_text(draw3, reference, y, reference_font3, self.text_color)
+                if section_name == 'urdu' and is_last_in_section and grade:
+                    y = self._draw_centered_text(draw, grading_display, y, grading_font, self.text_color)
+                    y += GRADING_SPACING
 
-        # Date at bottom
-        date_str = f"({date.day}{self._get_ordinal_suffix(date.day)} {date.strftime('%B')}, {date.year})"
-        self._draw_centered_text(draw3, date_str, self.height - 100, date_font, self.text_color)
+                self._draw_centered_text(draw, reference_text, y, reference_font, self.text_color)
 
-        return [page1, page2, page3]
+                if section_name == 'english' and is_last_in_section:
+                    date_str = f"({date.day}{self._get_ordinal_suffix(date.day)} {date.strftime('%B')}, {date.year})"
+                    self._draw_centered_text(draw, date_str, footer_line_y, date_font, self.text_color)
+                else:
+                    footer_text = next_section_label if is_last_in_section else "Continued... >>"
+                    self._draw_centered_text(draw, footer_text, footer_line_y, continuation_font, (100, 100, 100))
+
+                images.append(img)
+
+        return images
 
     def _get_ordinal_suffix(self, day: int) -> str:
         """Get ordinal suffix for day (1st, 2nd, 3rd, etc.)."""
