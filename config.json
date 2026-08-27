@@ -1,13 +1,18 @@
 {
   "hijri_offset_days": -1,
+  "islamic_events": {
+    "enabled": true,
+    "config_file": "islamic_events.json",
+    "comment": "Footer pill on ayat images for recurring/annual Islamic occasions. Edit islamic_events.json to add/remove/recolor events or toggle individual ones off."
+  },
   "quran_api": {
     "enabled": true,
     "fallback_to_local": true,
     "comment": "Credentials loaded from .env (QURAN_API_CLIENT_ID / QURAN_API_CLIENT_SECRET)"
   },
   "translations": {
-    "urdu": "Taqi",
-    "english": "TaqiEnglish",
+    "urdu": "Maududi",
+    "english": "MaududiEn",
     "available_urdu": [
       "Maududi",
       "Jalandhary",

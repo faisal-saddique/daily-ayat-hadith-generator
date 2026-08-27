@@ -344,7 +344,6 @@ class HadithProvider:
 
         for indicator in weak_indicators:
             if indicator in grade_lower:
-                logger.warning(f"Skipping weak hadith {hadith.hadith_number}: {hadith.grade}")
                 return True
 
         return False
@@ -382,6 +381,7 @@ class HadithProvider:
                 return hadith
 
             # Try next hadith
+            logger.warning(f"Skipping weak hadith {hadith.hadith_number}: {hadith.grade}")
             attempts += 1
             logger.info(f"Trying next hadith (attempt {attempts}/{max_attempts})...")
 

@@ -105,23 +105,41 @@ class AlHadeesScraper:
 
         logger.info(f"Fetching hadith from: {url}")
 
-        # Rate limiting
-        self._rate_limit()
+        max_retries = 3
+        backoff_seconds = 3.0
+        response = None
 
-        try:
-            response = requests.get(
-                url,
-                headers=self.headers,
-                timeout=self.timeout,
-                allow_redirects=True
-            )
-            response.raise_for_status()
+        for attempt in range(max_retries + 1):
+            # Rate limiting
+            self._rate_limit()
 
-        except requests.Timeout:
-            raise Exception(f"Request timeout while fetching hadith {hadith_number}")
-        except requests.RequestException as e:
-            raise Exception(f"Error fetching hadith {hadith_number}: {str(e)}")
+            try:
+                response = requests.get(
+                    url,
+                    headers=self.headers,
+                    timeout=self.timeout,
+                    allow_redirects=True
+                )
 
+                if response.status_code == 429 and attempt < max_retries:
+                    retry_after = response.headers.get('Retry-After')
+                    delay = float(retry_after) if retry_after else backoff_seconds * (2 ** attempt)
+                    logger.warning(
+                        f"al-hadees.com rate limited hadith {hadith_number} (429), "
+                        f"retrying in {delay:.1f}s (attempt {attempt + 1}/{max_retries})"
+                    )
+                    time.sleep(delay)
+                    continue
+
+                response.raise_for_status()
+                break
+
+            except requests.Timeout:
+                raise Exception(f"Request timeout while fetching hadith {hadith_number}")
+            except requests.RequestException as e:
+                raise Exception(f"Error fetching hadith {hadith_number}: {str(e)}")
+
+        assert response is not None
         # Parse HTML
         soup = BeautifulSoup(response.content, 'html.parser')
 

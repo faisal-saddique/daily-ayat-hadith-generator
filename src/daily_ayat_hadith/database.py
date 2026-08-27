@@ -354,7 +354,7 @@ class IslamicDatabase:
         cursor = self.conn.cursor()
 
         cursor.execute("""
-            SELECT HadithNumber, Arabic, Urdu
+            SELECT HadithNumber, Arabic, Urdu, Sanad
             FROM mishkaat
             WHERE HadithNumber = ?
         """, (hadith_number,))
@@ -366,11 +366,16 @@ class IslamicDatabase:
         # Generate simple English translation
         english = self._generate_hadith_english(row['HadithNumber'], row['Urdu'])
 
+        # Note: despite its name, the 'Sanad' column in this table stores the
+        # grading (e.g. صحیح / ضعیف), not the chain of narration.
+        grade = self._clean_text(row['Sanad']) if row['Sanad'] else ""
+
         return Hadith(
             hadith_number=row['HadithNumber'],
             arabic_text=self._clean_text(row['Arabic']),
             urdu_translation=self._clean_text(row['Urdu']),
-            english_translation=english
+            english_translation=english,
+            grade=grade
         )
 
     def _generate_hadith_english(self, hadith_number: int, urdu_text: str) -> str:

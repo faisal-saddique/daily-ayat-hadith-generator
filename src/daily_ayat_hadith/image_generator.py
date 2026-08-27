@@ -14,6 +14,12 @@ LAYOUT_ENGINE = ImageFont.Layout.RAQM
 class IslamicImageGenerator:
     """Generate beautiful Islamic images for Ayat and Hadith."""
 
+    # Extra vertical space always reserved above the footer date on ayat
+    # images, whether or not today actually has a matching event. Keeping
+    # this unconditional means the ayah/translation font scaling never
+    # shifts depending on whether an event pill happens to render today.
+    EVENT_PILL_RESERVE = 90
+
     def __init__(self, fonts_dir: Path, config_file: Path = None):
         self.fonts_dir = fonts_dir
         self.width = 1080
@@ -27,6 +33,7 @@ class IslamicImageGenerator:
             config_file = fonts_dir.parent / "config.json"
 
         self._load_font_config(config_file)
+        self._load_events_config(config_file)
 
     def _load_font_config(self, config_file: Path):
         """Load font configuration from config file."""
@@ -57,6 +64,142 @@ class IslamicImageGenerator:
             # Fallback to default fonts
             self.arabic_font_path = self.fonts_dir / "pdms.ttf"
             self.urdu_font_path = self.fonts_dir / "jameelnoorinastaleeq.ttf"
+
+    def _load_events_config(self, config_file: Path):
+        """Load the Islamic events table (recurring/annual occasions shown
+        as a footer pill on ayat images) referenced from config.json."""
+        self.events_enabled = False
+        self.events = []
+
+        if not config_file.exists():
+            return
+
+        with open(config_file, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+
+        events_cfg = config.get('islamic_events', {})
+        if not events_cfg.get('enabled', False):
+            return
+
+        events_file_rel = events_cfg.get('config_file', 'islamic_events.json')
+        events_file = self.fonts_dir.parent / events_file_rel
+        if not events_file.exists():
+            return
+
+        with open(events_file, 'r', encoding='utf-8') as f:
+            events_data = json.load(f)
+
+        self.events = [e for e in events_data.get('events', []) if e.get('enabled', True)]
+        self.events_enabled = True
+
+    def _get_event_for_date(self, hijri_month: int, hijri_day: int) -> dict | None:
+        """Return the first configured event matching this Hijri month/day,
+        or None. hijri_month=None on an event means "every month" (used for
+        recurring occasions like Ayyam al-Beed)."""
+        if not self.events_enabled:
+            return None
+        for event in self.events:
+            month = event.get('hijri_month')
+            if month is not None and month != hijri_month:
+                continue
+            if hijri_day in event.get('hijri_days', []):
+                return event
+        return None
+
+    @staticmethod
+    def _hex_to_rgb(hex_color: str) -> tuple:
+        h = hex_color.lstrip('#')
+        return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+    @staticmethod
+    def _lighten(rgb: tuple, factor: float) -> tuple:
+        return tuple(int(c + (255 - c) * factor) for c in rgb)
+
+    @staticmethod
+    def _darken(rgb: tuple, factor: float) -> tuple:
+        return tuple(int(c * (1 - factor)) for c in rgb)
+
+    def _draw_event_pill(self, img: Image.Image, draw: ImageDraw.Draw, event: dict, top_y: int) -> int:
+        """Draw a filled, bilingual (English + Urdu) pill for an Islamic
+        event, centered horizontally. Shrinks its font size to stay within
+        a safe width if a longer event name would otherwise overflow. The
+        fill is a light-to-dark gradient of the event's own color rather
+        than a flat tint, for a bit of depth.
+
+        Returns the y position just below the pill.
+        """
+        en_text = event.get('name_en', '')
+        ur_text = event.get('name_ur', '')
+        ur_display = self._get_display_text(ur_text, use_raqm=True)
+        bg_color = event.get('bg_color', '#333333')
+        text_color = event.get('text_color', '#FFFFFF')
+
+        max_content_width = self.width - 160
+        font_size = 28
+        min_font_size = 18
+        separator = "   •   "
+
+        while True:
+            en_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", font_size)
+            ur_font = ImageFont.truetype(str(self.urdu_font_path), font_size + 8, layout_engine=LAYOUT_ENGINE)
+
+            en_bbox = en_font.getbbox(en_text)
+            ur_bbox = ur_font.getbbox(ur_display)
+            sep_bbox = en_font.getbbox(separator)
+
+            en_w = en_bbox[2] - en_bbox[0]
+            ur_w = ur_bbox[2] - ur_bbox[0]
+            sep_w = sep_bbox[2] - sep_bbox[0]
+            content_w = en_w + sep_w + ur_w
+
+            if content_w <= max_content_width or font_size <= min_font_size:
+                break
+            font_size -= 2
+
+        content_h = max(en_bbox[3] - en_bbox[1], ur_bbox[3] - ur_bbox[1])
+        pad_x, pad_y = 26, 8
+        box_w = content_w + pad_x * 2
+        box_h = content_h + pad_y * 2
+        box_x = (self.width - box_w) // 2
+
+        base_rgb = self._hex_to_rgb(bg_color)
+        gradient_start = self._lighten(base_rgb, 0.18)
+        gradient_end = self._darken(base_rgb, 0.14)
+
+        gradient = Image.new('RGB', (box_w, box_h))
+        gradient_draw = ImageDraw.Draw(gradient)
+        for x in range(box_w):
+            t = x / max(box_w - 1, 1)
+            column_color = tuple(
+                int(gradient_start[i] + (gradient_end[i] - gradient_start[i]) * t)
+                for i in range(3)
+            )
+            gradient_draw.line([(x, 0), (x, box_h)], fill=column_color)
+
+        mask = Image.new('L', (box_w, box_h), 0)
+        ImageDraw.Draw(mask).rounded_rectangle(
+            [0, 0, box_w - 1, box_h - 1], radius=box_h // 2, fill=255
+        )
+        img.paste(gradient, (box_x, top_y), mask)
+
+        # Center each run within the row band individually - the bullet's
+        # glyph box is much shorter than the text around it, so aligning all
+        # three to the same top offset (as opposed to each one's own vertical
+        # center) leaves it sitting high instead of mid-line.
+        row_top = top_y + pad_y
+
+        def _v_centered_y(bbox: tuple) -> int:
+            h = bbox[3] - bbox[1]
+            return row_top + (content_h - h) // 2 - bbox[1]
+
+        cursor_x = box_x + pad_x
+        draw.text((cursor_x, _v_centered_y(en_bbox)), en_text, font=en_font, fill=text_color)
+        cursor_x += en_w
+        draw.text((cursor_x, _v_centered_y(sep_bbox)), separator, font=en_font, fill=text_color)
+        cursor_x += sep_w
+        draw.text((cursor_x, _v_centered_y(ur_bbox)), ur_display, font=ur_font, fill=text_color)
+
+        return top_y + box_h
 
     def _get_display_text(self, text: str, use_raqm: bool = False) -> str:
         """Reshape and reverse Arabic/Urdu text for proper display.
@@ -383,7 +526,7 @@ class IslamicImageGenerator:
             {'text': english_clean, 'font_size': 52, 'font_path': '/System/Library/Fonts/Helvetica.ttc', 'type': 'multi', 'line_spacing': 12, 'margin': 150, 'spacing_after': 60},
         ]
 
-        max_content_height = self.height - 160
+        max_content_height = self.height - 160 - self.EVENT_PILL_RESERVE
         scaling = self._calculate_adaptive_layout(content_blocks, max_content_height)
 
         # If scaling is too small (fonts would be cramped), use multi-page layout
@@ -452,17 +595,25 @@ class IslamicImageGenerator:
         reference = f"({ayah_reference})"
         y = self._draw_centered_text(draw, reference, y, reference_font, self.text_color)
 
-        # Date (Islamic calendar) at fixed bottom position
+        # Date (Islamic calendar) at fixed bottom position. Hijri month/day is
+        # always computed here (even when islamic_date_override supplies the
+        # display string) so the event pill lookup works regardless of override.
+        adjusted_date = date + timedelta(days=self.hijri_offset_days)
+        hijri_date = Gregorian(adjusted_date.year, adjusted_date.month, adjusted_date.day).to_hijri()
         if islamic_date_override:
             date_str = f"({islamic_date_override})"
         else:
-            adjusted_date = date + timedelta(days=self.hijri_offset_days)
-            hijri_date = Gregorian(adjusted_date.year, adjusted_date.month, adjusted_date.day).to_hijri()
             hijri_months = ["", "Muharram", "Safar", "Rabi' al-Awwal", "Rabi' al-Thani",
                            "Jumada al-Awwal", "Jumada al-Thani", "Rajab", "Sha'ban",
                            "Ramadan", "Shawwal", "Dhul-Qi'dah", "Dhul-Hijjah"]
             date_str = f"({hijri_date.day}{self._get_ordinal_suffix(hijri_date.day)} {hijri_months[hijri_date.month]}, {hijri_date.year}AH)"
-        self._draw_centered_text(draw, date_str, self.height - 100, date_font, self.text_color)
+
+        event = self._get_event_for_date(hijri_date.month, hijri_date.day)
+        if event:
+            pill_bottom = self._draw_event_pill(img, draw, event, self.height - 175)
+            self._draw_centered_text(draw, date_str, pill_bottom + 14, date_font, self.text_color)
+        else:
+            self._draw_centered_text(draw, date_str, self.height - 100, date_font, self.text_color)
 
         return img
 
@@ -569,7 +720,7 @@ class IslamicImageGenerator:
             {'text': english_clean, 'font_size': 58, 'font_path': '/System/Library/Fonts/Helvetica.ttc', 'type': 'multi', 'line_spacing': 12, 'margin': 140, 'spacing_after': 60},
         ]
 
-        max_content_height = self.height - 200  # Extra space for page indicator
+        max_content_height = self.height - 200 - self.EVENT_PILL_RESERVE  # Extra space for page indicator
         scaling = self._calculate_adaptive_layout(content_blocks, max_content_height)
 
         # Create image
@@ -604,17 +755,25 @@ class IslamicImageGenerator:
         reference = f"({ayah_reference})"
         y = self._draw_centered_text(draw, reference, y, reference_font, self.text_color)
 
-        # Date (Islamic calendar) at bottom
+        # Date (Islamic calendar) at bottom. Hijri month/day is always
+        # computed here (even with islamic_date_override) so the event pill
+        # lookup works regardless of override.
+        adjusted_date = date + timedelta(days=self.hijri_offset_days)
+        hijri_date = Gregorian(adjusted_date.year, adjusted_date.month, adjusted_date.day).to_hijri()
         if islamic_date_override:
             date_str = f"({islamic_date_override})"
         else:
-            adjusted_date = date + timedelta(days=self.hijri_offset_days)
-            hijri_date = Gregorian(adjusted_date.year, adjusted_date.month, adjusted_date.day).to_hijri()
             hijri_months = ["", "Muharram", "Safar", "Rabi' al-Awwal", "Rabi' al-Thani",
                            "Jumada al-Awwal", "Jumada al-Thani", "Rajab", "Sha'ban",
                            "Ramadan", "Shawwal", "Dhul-Qi'dah", "Dhul-Hijjah"]
             date_str = f"({hijri_date.day}{self._get_ordinal_suffix(hijri_date.day)} {hijri_months[hijri_date.month]}, {hijri_date.year}AH)"
-        self._draw_centered_text(draw, date_str, self.height - 100, date_font, self.text_color)
+
+        event = self._get_event_for_date(hijri_date.month, hijri_date.day)
+        if event:
+            pill_bottom = self._draw_event_pill(img, draw, event, self.height - 175)
+            self._draw_centered_text(draw, date_str, pill_bottom + 14, date_font, self.text_color)
+        else:
+            self._draw_centered_text(draw, date_str, self.height - 100, date_font, self.text_color)
 
         return img
 

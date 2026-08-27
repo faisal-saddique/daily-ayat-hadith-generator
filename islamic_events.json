@@ -1,0 +1,97 @@
+{
+  "_comment": "Recurring/annual Islamic occasions shown as a footer pill on ayat images, matched against the Hijri date already computed for that image. hijri_month=null means 'every month' (used for Ayyam al-Beed). Set enabled=false to hide an event without deleting it. Colors are hex strings passed straight to Pillow.",
+  "events": [
+    {
+      "id": "ayyam_al_beed",
+      "enabled": true,
+      "name_en": "Ayyam al-Beed (White Days)",
+      "name_ur": "ایامِ بیض",
+      "hijri_month": null,
+      "hijri_days": [13, 14, 15],
+      "bg_color": "#E8E3D3",
+      "text_color": "#6B5F3E"
+    },
+    {
+      "id": "hijri_new_year",
+      "enabled": true,
+      "name_en": "Islamic New Year",
+      "name_ur": "اسلامی نیا سال",
+      "hijri_month": 1,
+      "hijri_days": [1],
+      "bg_color": "#2B4C5C",
+      "text_color": "#E8EEF0"
+    },
+    {
+      "id": "ashura",
+      "enabled": true,
+      "name_en": "Day of Ashura",
+      "name_ur": "یومِ عاشورہ",
+      "hijri_month": 1,
+      "hijri_days": [10],
+      "bg_color": "#6B1E23",
+      "text_color": "#F2E6C9"
+    },
+    {
+      "id": "mawlid_an_nabi",
+      "enabled": false,
+      "_note": "Off by default - the 12th Rabi al-Awwal date and the observance itself are both disputed among scholars. Flip enabled=true if you want it shown.",
+      "name_en": "Mawlid an-Nabi",
+      "name_ur": "میلاد النبی ﷺ",
+      "hijri_month": 3,
+      "hijri_days": [12],
+      "bg_color": "#6E4A8C",
+      "text_color": "#F5EFFA"
+    },
+    {
+      "id": "ramadan_start",
+      "enabled": true,
+      "name_en": "Start of Ramadan",
+      "name_ur": "آغازِ رمضان",
+      "hijri_month": 9,
+      "hijri_days": [1],
+      "bg_color": "#3C6E52",
+      "text_color": "#F5F5EF"
+    },
+    {
+      "id": "laylat_al_qadr_odd_nights",
+      "enabled": true,
+      "_note": "The exact night of Laylat al-Qadr is not agreed upon; sources cite 17th/21st/23rd/24th/25th/27th/29th of Ramadan variously. This covers the commonly observed odd nights of the last ten. Phrasing is intentionally soft ('possible') rather than asserting certainty.",
+      "name_en": "Possible Night of Qadr",
+      "name_ur": "شبِ قدر کا امکان",
+      "hijri_month": 9,
+      "hijri_days": [21, 23, 25, 27, 29],
+      "bg_color": "#1F2A44",
+      "text_color": "#E8C878"
+    },
+    {
+      "id": "eid_al_fitr",
+      "enabled": true,
+      "name_en": "Eid al-Fitr",
+      "name_ur": "عید الفطر",
+      "hijri_month": 10,
+      "hijri_days": [1],
+      "bg_color": "#1F6F5C",
+      "text_color": "#FFFDF5"
+    },
+    {
+      "id": "arafah_day",
+      "enabled": true,
+      "name_en": "Day of Arafah",
+      "name_ur": "یومِ عرفہ",
+      "hijri_month": 12,
+      "hijri_days": [9],
+      "bg_color": "#C9A66B",
+      "text_color": "#3B2E12"
+    },
+    {
+      "id": "eid_al_adha",
+      "enabled": true,
+      "name_en": "Eid al-Adha",
+      "name_ur": "عید الاضحیٰ",
+      "hijri_month": 12,
+      "hijri_days": [10],
+      "bg_color": "#8F6E24",
+      "text_color": "#FFFDF5"
+    }
+  ]
+}
