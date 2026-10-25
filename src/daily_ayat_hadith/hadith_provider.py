@@ -348,7 +348,7 @@ class HadithProvider:
 
         return False
 
-    def get_next_hadith(self, current_hadith_number: int, max_attempts: int = 10) -> Hadith:
+    def get_next_hadith(self, current_hadith_number: int, max_attempts: int = 20) -> Hadith:
         """
         Get the next hadith in sequence, skipping weak (ضعیف) hadiths.
 
